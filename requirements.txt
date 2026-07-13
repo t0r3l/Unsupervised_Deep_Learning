@@ -1,0 +1,33 @@
+# Unsupervised Deep Learning — Quick, Draw! sketches
+# Python 3.10+  |  install with:  pip install -r requirements.txt
+
+# --- Core numerics ---
+numpy>=1.26
+scipy>=1.11
+pandas>=2.1
+
+# --- Deep learning (Keras 3 ships inside TensorFlow >= 2.16) ---
+tensorflow>=2.16
+keras>=3.0
+
+# --- Classic ML: clustering + evaluation metrics (KMeans, ARI, NMI, silhouette) ---
+scikit-learn>=1.4
+
+# --- Dimensionality reduction / cluster visualization ---
+umap-learn>=0.5
+
+# --- Plotting ---
+matplotlib>=3.8
+seaborn>=0.13
+
+# --- Image handling ---
+Pillow>=10.0
+
+# --- Quick, Draw! data access (downloads & parses per-category .bin files) ---
+quickdraw>=1.0
+
+# --- Notebooks & utilities ---
+jupyter>=1.0
+notebook>=7.0
+ipykernel>=6.29
+tqdm>=4.66
