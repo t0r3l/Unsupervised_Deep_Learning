@@ -63,3 +63,9 @@ ENV/
 .idea/
 .DS_Store
 Thumbs.db
+
+Scripts/
+Lib/
+etc/
+pyvenv.cfg
+share/
