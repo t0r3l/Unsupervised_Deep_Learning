@@ -121,33 +121,31 @@ jupyter notebook src/exploration.ipynb
 
 ## Tester les modèles — app interactive
 
-`src/kmeas/` contient une app pour entraîner et explorer les K-means (le K-means y est
-vu comme un **codec** : chaque image se résume à l'indice de son centroïde). Deux
-frontends servent le même code dans `utils/` — choisis-en un, ils sont équivalents.
-
-**Gradio** (recommandé) — se lance comme un script Python normal :
+`src/kmeas/` contient une app **Gradio** pour entraîner et explorer les K-means (le
+K-means y est vu comme un **codec** : chaque image se résume à l'indice de son
+centroïde). Elle se lance comme un script Python normal :
 
 ```bash
 cd src/kmeas
-python app_gradio.py          # ouvre http://127.0.0.1:7860 dans le navigateur
+python app.py                 # ouvre http://127.0.0.1:7860 dans le navigateur
 ```
 
-**Streamlit** — attention, `python app.py` ne fonctionne **pas** (le script s'exécute
-et se termine sans rien afficher : Streamlit doit piloter lui-même son exécution) :
+Le **dataset se choisit dans l'app** (MNIST ou Quick, Draw!) et vaut pour tous les
+onglets ; il est chargé via `src/data_import.py`. Quatre onglets :
 
-```bash
-cd src/kmeas
-streamlit run app.py          # et surtout pas `python app.py`
-```
+- **Entraînement** — K, nombre d'images, seed, itérations, tolérance. K et les
+  itérations n'ont pas de plafond, les images montent jusqu'à tout le split train.
+- **Compression / Décompression** — une image → un entier → sa reconstruction, sur
+  les deux splits à la fois.
+- **Espace latent** — projection PCA colorée par cluster, train et test en une fois.
+- **Centroïdes** — tous les centroïdes appris, le dictionnaire du codec.
 
-Les deux exposent les mêmes 4 onglets : **Entraînement** (K, nombre d'images, seed,
-itérations, tolérance), **Compression / Décompression** (une image → un entier → sa
-reconstruction), **Espace latent** (projection PCA colorée par cluster) et
-**Centroïdes** (le dictionnaire appris). Les modèles entraînés sont sauvegardés en
-`.npz` sous `src/kmeas/models/` et se rechargent depuis le sélecteur de gauche.
+Les modèles sont sauvegardés en `.npz` sous `src/kmeas/models/`, estampillés de leur
+algo et de leur dataset : le sélecteur ne propose que ceux qui correspondent à la vue
+courante.
 
-> Le premier démarrage prend ~20 s : c'est l'import de TensorFlow et le chargement de
-> MNIST, une seule fois par lancement.
+> Le premier démarrage prend ~20 s : c'est l'import de TensorFlow et le chargement du
+> dataset, une seule fois par lancement.
 
 ## Workflow
 

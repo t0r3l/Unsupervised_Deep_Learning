@@ -96,13 +96,22 @@ def has_converged(old_centroids, new_centroids, tolerance):
 
     return tf.reduce_all(squared_shifts < tolerance)
 
-def fit_kmeans(X, k, max_iter, tolerance, seed, verbose): 
+def fit_kmeans(X, k, max_iter, tolerance, seed, verbose, return_history=False):
+    """Entraîne un K-means. Retourne (centroids, labels).
+
+    return_history=True ajoute un 3e élément : l'inertie à chaque itération,
+    c'est-à-dire la courbe d'entraînement. Elle est déjà calculée par la boucle
+    (elle sert au suivi verbose) — on ne fait que la conserver. Le défaut False
+    garde la signature d'origine pour les appels à deux valeurs de retour.
+    """
     # Convertir X en tenseur TensorFlow
     X = tf.cast(tf.convert_to_tensor(X), tf.float32)
-    
+
     # Initialiser les centroïdes
     centroids = initialize_centroids(X, k, seed)
-    
+
+    history = []
+
     # Boucle d'itération
     for iteration in range(max_iter):
         # Calculer les distances
@@ -116,7 +125,8 @@ def fit_kmeans(X, k, max_iter, tolerance, seed, verbose):
         
         # Calcul de l'inertie
         inertia = compute_inertia(X, labels, new_centroids)
-        
+        history.append(float(inertia))
+
         # Affichage optionnel
         if verbose and iteration % 10 == 0:
             print(f"Iteration {iteration}: inertia = {inertia:.4f}")
@@ -129,5 +139,7 @@ def fit_kmeans(X, k, max_iter, tolerance, seed, verbose):
             if verbose:
                 print(f"Convergence après {iteration + 1} itérations")
             break
-        
+
+    if return_history:
+        return centroids, labels, history
     return centroids, labels
