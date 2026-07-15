@@ -1,0 +1,10 @@
+[server]
+# Par défaut, Streamlit surveille les fichiers de TOUS les modules importés pour
+# recharger l'app quand un fichier change. TensorFlow en importe des milliers :
+# ce parcours coûte ~7 s À CHAQUE rerun (donc à chaque clic, chaque slider).
+# Le désactiver fait tomber le rerun à ~0,4 s — soit 17x plus rapide.
+#
+# Contrepartie : l'app ne se recharge plus toute seule quand tu édites le code.
+#   - modif de app.py       -> touche "R" dans le navigateur (relit le fichier)
+#   - modif de utils/*.py   -> Ctrl+C puis relancer `streamlit run app.py`
+fileWatcherType = "none"

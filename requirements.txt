@@ -26,6 +26,9 @@ Pillow>=10.0
 # --- Quick, Draw! data access (downloads & parses per-category .bin files) ---
 quickdraw>=1.0
 
+# --- App interactive de test des modèles (src/kmeas/app_gradio.py) ---
+gradio>=6.0
+
 # --- Notebooks & utilities ---
 jupyter>=1.0
 notebook>=7.0
