@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow.keras.datasets import mnist
 import numpy as np
-from utils.kmeas import compute_squared_distances
+from .kmeas import compute_squared_distances
 
 def encode(X, centroids):
     X = tf.cast(tf.convert_to_tensor(X), tf.float32)
