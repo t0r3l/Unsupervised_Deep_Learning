@@ -1,13 +1,19 @@
-"""App Gradio — explorer le K-means comme codec (quantification vectorielle) sur MNIST.
+"""App Gradio — explorer le K-means comme codec (quantification vectorielle).
 
 Lancement, depuis src/kmeas/ :
     python app_gradio.py
 
-Port de app.py (Streamlit). Différence de modèle d'exécution : Streamlit réexécute
-tout le script à chaque interaction, Gradio n'appelle que la fonction câblée sur
-l'événement. Les données MNIST sont donc chargées une seule fois, au démarrage,
-sans avoir besoin d'un décorateur de cache.
+Le dataset se choisit dans l'app (MNIST ou Quick, Draw!) et vaut pour tous les
+onglets. Le chargement passe par src/data_import.py, l'entrée unique du projet :
+tous les datasets en ressortent au même format (n, 784) float32 dans [0, 1].
+
+Port de app.py (Streamlit). Différence de modèle d'exécution : Streamlit
+réexécute tout le script à chaque interaction, Gradio n'appelle que la fonction
+câblée sur l'événement.
 """
+
+import sys
+from pathlib import Path
 
 import matplotlib
 
@@ -21,30 +27,48 @@ import numpy as np
 
 import gradio as gr
 
-from utils.codec import decode, encode
-from utils.data import flatten_images, load_mnist, normalize_images
-from utils.kmeas import (
+# data_import.py vit dans src/, ce fichier dans src/kmeas/ : sans ça, `import
+# data_import` échoue selon le dossier depuis lequel on lance l'app.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from data_import import DATASETS, load_dataset  # noqa: E402
+
+from utils.codec import decode, encode  # noqa: E402
+from utils.kmeas import (  # noqa: E402
     assign_clusters,
     compute_inertia,
     compute_squared_distances,
     fit_kmeans,
 )
-from utils.registry import delete_model, list_models, load_model, save_model
-from utils.visualization import plot_latent_space, show_images
+from utils.registry import delete_model, list_models, load_model, save_model  # noqa: E402
+from utils.visualization import plot_latent_space, show_images  # noqa: E402
 
 # TODO: une fois utils/metrics.py implémenté, le brancher dans l'onglet Compression
 # pour afficher MSE de reconstruction et taux de compression :
 #   from utils.metrics import mean_squared_error, compute_compression_ratio
 
 IMAGE_DIM = 784
+DEFAULT_DATASET = "mnist"
 
-print("Chargement de MNIST…")
-(_x_train, _y_train), (_x_test, _y_test) = load_mnist()
-X_TRAIN = flatten_images(normalize_images(_x_train))
-X_TEST = flatten_images(normalize_images(_x_test))
-Y_TRAIN = np.asarray(_y_train)
-Y_TEST = np.asarray(_y_test)
-print(f"MNIST prêt — {len(X_TRAIN)} images d'entraînement, {len(X_TEST)} de test.")
+# Les datasets restent en mémoire une fois chargés : MNIST coûte ~10 s (import
+# TensorFlow), et on ne modifie jamais ces tableaux.
+_LOADED = {}
+
+
+def get_dataset(key, progress=None):
+    """Charge un dataset (ou le ressort du cache). Entrée unique de l'app."""
+    if key not in _LOADED:
+        _LOADED[key] = load_dataset(key, progress=progress)
+    return _LOADED[key]
+
+
+def split_of(ds, split):
+    """(X, y) du split demandé — évite de répéter le ternaire partout."""
+    return (ds.X_train, ds.y_train) if split == "Train" else (ds.X_test, ds.y_test)
+
+
+def label_name(ds, y):
+    """Nom lisible d'un label : « 7 » pour MNIST, « cat » pour Quick, Draw!."""
+    return ds.class_names[int(y)]
 
 
 # ------------------------------------------------------------------ Helpers
@@ -94,8 +118,28 @@ def released(fig):
 NO_MODEL = "⚠️ Sélectionne ou entraîne un modèle d'abord."
 
 
-def model_choices(selected=None):
-    models = list_models()
+def models_for(ds_key):
+    """Modèles entraînés sur ce dataset uniquement.
+
+    Un K-means MNIST et un K-means Quick, Draw! ont tous deux des centroïdes
+    (k, 784) : les croiser « marcherait » silencieusement tout en produisant
+    n'importe quoi. On filtre donc par dataset plutôt que de tout lister.
+    """
+    out = []
+    for name in list_models():
+        try:
+            _, meta = load_model(name)
+        except Exception:
+            continue  # .npz corrompu ou d'un format plus ancien : on l'ignore
+        # Les modèles d'avant le sélecteur n'ont pas de clé « dataset » : ils
+        # ont tous été entraînés sur MNIST.
+        if meta.get("dataset", "mnist") == ds_key:
+            out.append(name)
+    return out
+
+
+def model_choices(ds_key, selected=None):
+    models = models_for(ds_key)
     if selected is None or selected not in models:
         selected = models[0] if models else None
     return gr.update(choices=models, value=selected), selected
@@ -103,12 +147,14 @@ def model_choices(selected=None):
 
 def describe_model(name):
     if not name:
-        return "ℹ️ Aucun modèle. Entraîne-en un dans l'onglet **Entraînement**."
+        return "ℹ️ Aucun modèle pour ce dataset. Entraîne-en un dans l'onglet **Entraînement**."
 
     _, meta = load_model(name)
+    ds_key = meta.get("dataset", "mnist")
     return (
         f"### `{name}`\n"
         f"| | |\n|---|---|\n"
+        f"| **Dataset** | {ds_key} |\n"
         f"| **K — clusters** | {meta['k']} |\n"
         f"| **Images d'entraînement** | {meta['n_samples']} |\n"
         f"| **Inertie finale** | {meta['inertia']:.1f} |\n\n"
@@ -120,30 +166,86 @@ def describe_model(name):
 # --------------------------------------------------------------- Événements
 
 
-def sync_name(k, n_samples, current, previous_auto):
-    """Le nom suit K/n_samples, mais ne doit jamais écraser une saisie manuelle.
+def max_train_images(ds_key):
+    """Nombre max d'images d'entraînement du dataset actif."""
+    return len(get_dataset(ds_key).X_train)
+
+
+def switch_dataset(ds_key, n_cur, nviz_cur, idx_cur, progress=gr.Progress()):
+    """Change le dataset actif : recharge, refiltre les modèles, réajuste l'UI."""
+    ds = get_dataset(ds_key, progress=progress)
+    n_train, n_test = len(ds.X_train), len(ds.X_test)
+    idx_max = min(n_train, n_test) - 1
+
+    update, selected = model_choices(ds_key)
+    banner = (
+        f"**{DATASETS[ds_key]}**  \n{n_train} images d'entraînement · {n_test} de test · "
+        f"{len(ds.class_names)} classes : {', '.join(ds.class_names)}"
+    )
+
+    # Relever le plafond ne suffit pas : 60 000 saisi sur MNIST resterait affiché
+    # sur Quick, Draw! (25 715 max) et ne planterait qu'au clic sur Entraîner.
+    # On ramène donc aussi les valeurs dans les nouvelles bornes.
+    clamp = lambda v, hi: min(int(v or 1), hi)
+
+    return (
+        banner,
+        update,
+        describe_model(selected),
+        # Les bornes dépendent du dataset : elles doivent suivre.
+        gr.update(
+            maximum=n_train,
+            value=clamp(n_cur, n_train),
+            label=f"Images d'entraînement (max {n_train})",
+        ),
+        gr.update(
+            maximum=n_train,
+            value=clamp(nviz_cur, n_train),
+            label=f"Images à projeter (max {n_train})",
+        ),
+        gr.update(
+            maximum=idx_max,
+            value=min(int(idx_cur or 0), idx_max),
+            label=f"Index de l'image (0 à {idx_max})",
+        ),
+        # Les figures affichées viennent de l'ancien dataset : on les vide plutôt
+        # que de laisser croire qu'elles concernent le nouveau.
+        None,
+        "",
+        None,
+        None,
+        "",
+        None,
+        "",
+    )
+
+
+def sync_name(ds_key, k, n_samples, current, previous_auto):
+    """Le nom suit dataset/K/n_samples, mais n'écrase jamais une saisie manuelle.
 
     k/n_samples viennent de gr.Number : vider le champ renvoie None, d'où le or 0.
     """
-    auto = f"kmeans_k{int(k or 0)}_n{int(n_samples or 0)}"
+    auto = f"{ds_key}_k{int(k or 0)}_n{int(n_samples or 0)}"
     keep_current = current and current.strip() and current != previous_auto
     return (current if keep_current else auto), auto
 
 
-def train(k, n_samples, seed, max_iter, tolerance, name):
+def train(ds_key, k, n_samples, seed, max_iter, tolerance, name):
     name = (name or "").strip()
     if not name:
         raise gr.Error("Donne un nom au modèle avant d'entraîner.")
 
+    ds = get_dataset(ds_key)
     k, n_samples, max_iter = int(k or 0), int(n_samples or 0), int(max_iter or 0)
 
     if k < 1:
         raise gr.Error("K doit valoir au moins 1.")
     if max_iter < 1:
         raise gr.Error("Il faut au moins 1 itération.")
-    if not 1 <= n_samples <= len(X_TRAIN):
+    if not 1 <= n_samples <= len(ds.X_train):
         raise gr.Error(
-            f"Images d'entraînement : entre 1 et {len(X_TRAIN)} (taille du split train)."
+            f"Images d'entraînement : entre 1 et {len(ds.X_train)} "
+            f"(taille du split train de {ds_key})."
         )
     # initialize_centroids tire k indices parmi n sans remise : si k > n, elle
     # renvoie silencieusement moins de k centroïdes et fit_kmeans casse plus loin
@@ -154,7 +256,7 @@ def train(k, n_samples, seed, max_iter, tolerance, name):
             f"de clusters que de points. Baisse K ou augmente les images."
         )
 
-    X_fit = X_TRAIN[:n_samples]
+    X_fit = ds.X_train[:n_samples]
     centroids, labels = fit_kmeans(
         X=X_fit,
         k=k,
@@ -169,6 +271,7 @@ def train(k, n_samples, seed, max_iter, tolerance, name):
         name,
         centroids,
         {
+            "dataset": ds_key,
             "k": k,
             "n_samples": n_samples,
             "max_iter": max_iter,
@@ -178,38 +281,36 @@ def train(k, n_samples, seed, max_iter, tolerance, name):
         },
     )
     status = (
-        f"✅ Modèle **{name}** entraîné et sauvegardé — inertie finale : "
+        f"✅ Modèle **{name}** entraîné sur {ds_key} et sauvegardé — inertie finale : "
         f"{inertia:.1f}. Il est sélectionné ci-dessus."
     )
-    update, selected = model_choices(name)
+    update, selected = model_choices(ds_key, name)
     return update, describe_model(selected), status
 
 
-def remove_model(name):
+def remove_model(ds_key, name):
     if not name:
         raise gr.Error("Aucun modèle sélectionné.")
     delete_model(name)
-    update, selected = model_choices()
+    update, selected = model_choices(ds_key)
     return update, describe_model(selected), f"🗑️ Modèle **{name}** supprimé."
 
 
-def run_codec(name, idx):
+def run_codec(ds_key, name, idx):
     """Encode/décode la même image sur les deux splits, côte à côte."""
     if not name:
         return None, NO_MODEL
 
+    ds = get_dataset(ds_key)
     centroids, meta = load_model(name)
 
-    # Le même index doit être valide sur les deux splits : on borne au plus
-    # petit des deux (test = 10 000).
-    n_max = min(len(X_TRAIN), len(X_TEST))
+    # Le même index doit être valide sur les deux splits : on borne au plus petit.
+    n_max = min(len(ds.X_train), len(ds.X_test))
     idx = int(np.clip(int(idx or 0), 0, n_max - 1))
 
     images, titles, codes = [], [], {}
-    for split, X_split, y_split in (
-        ("Train", X_TRAIN, Y_TRAIN),
-        ("Test", X_TEST, Y_TEST),
-    ):
+    for split in ("Train", "Test"):
+        X_split, y_split = split_of(ds, split)
         image = X_split[idx]
         code = int(encode(image, centroids).numpy())
         reconstruction = decode(code, centroids)
@@ -217,7 +318,7 @@ def run_codec(name, idx):
 
         images += [image, reconstruction]
         titles += [
-            f"{split} — original (chiffre {y_split[idx]})",
+            f"{split} — original ({label_name(ds, y_split[idx])})",
             f"{split} — reconstruit (code {code})",
         ]
 
@@ -226,8 +327,8 @@ def run_codec(name, idx):
 
     bits = int(np.ceil(np.log2(meta["k"]))) if meta["k"] > 1 else 0
     info = (
-        f"Image **n°{idx}** des deux splits (index borné à {n_max - 1}, la taille du "
-        f"split test).\n\n"
+        f"Image **n°{idx}** des deux splits de **{ds_key}** (index borné à {n_max - 1}, "
+        f"la taille du split test).\n\n"
         f"Chaque image (784 pixels) est transmise sous la forme d'**un seul entier** — "
         f"code {codes['Train']} pour train, code {codes['Test']} pour test — soit "
         f"{bits} bits pour K={meta['k']}. Le décodeur renvoie le centroïde portant ce "
@@ -236,26 +337,28 @@ def run_codec(name, idx):
     return released(fig), info
 
 
-def run_latent(name, n_viz, show_true):
+def run_latent(ds_key, name, n_viz, show_true):
     """Projette les deux splits d'un coup : une figure par split, titrée."""
     if not name:
         return None, None, NO_MODEL
 
+    ds = get_dataset(ds_key)
     centroids, meta = load_model(name)
 
     n_viz = int(n_viz or 0)
     if n_viz < 1:
         raise gr.Error("Images à projeter : au moins 1.")
-    if n_viz > len(X_TRAIN):
-        raise gr.Error(f"Images à projeter : au plus {len(X_TRAIN)} (taille du split train).")
+    if n_viz > len(ds.X_train):
+        raise gr.Error(
+            f"Images à projeter : au plus {len(ds.X_train)} (split train de {ds_key})."
+        )
+
+    y_label = "Chiffre réel" if ds_key == "mnist" else "Classe réelle"
 
     figures, counts = [], {}
-    for split, X_all, y_all in (
-        ("Train", X_TRAIN, Y_TRAIN),
-        ("Test", X_TEST, Y_TEST),
-    ):
-        # Test ne contient que 10 000 images : on prend ce qui existe plutôt que
-        # de refuser la projection de train.
+    for split in ("Train", "Test"):
+        X_all, y_all = split_of(ds, split)
+        # Test est plus petit : on prend ce qui existe plutôt que de refuser.
         n = min(n_viz, len(X_all))
         counts[split] = n
         X_viz, y_viz = X_all[:n], y_all[:n]
@@ -269,19 +372,18 @@ def run_latent(name, n_viz, show_true):
                     centroids=centroids,
                     y_true=y_viz if show_true else None,
                     title=f"{split.upper()} — {n} images (projection PCA)",
+                    y_label=y_label,
                     show=False,
                 )
             )
         )
 
     info = (
-        f"**Train : {counts['Train']} images · Test : {counts['Test']} images.** "
+        f"**{ds_key} — Train : {counts['Train']} images · Test : {counts['Test']} images.** "
         f"Le modèle, lui, a été entraîné sur {meta['n_samples']} images de train.\n\n"
     )
     if counts["Test"] < counts["Train"]:
-        info += (
-            f"ℹ️ Test plafonne à {len(X_TEST)} images : c'est toute sa taille.\n\n"
-        )
+        info += f"ℹ️ Test plafonne à {len(ds.X_test)} images : c'est toute sa taille.\n\n"
     info += (
         f"Rappel : le vrai espace latent de ce K-means est **un entier discret** dans "
         f"{{0, …, {meta['k'] - 1}}}. Ces nuages sont une *projection PCA des données* en "
@@ -295,7 +397,7 @@ def run_latent(name, n_viz, show_true):
     return figures[0], figures[1], info
 
 
-def run_centroids(name):
+def run_centroids(ds_key, name):
     """Affiche TOUS les centroïdes du modèle — aucune troncature."""
     if not name:
         return None, NO_MODEL
@@ -343,25 +445,40 @@ def run_centroids(name):
 
 # ---------------------------------------------------------------------- UI
 
-with gr.Blocks(title="K-means codec — MNIST") as demo:
-    gr.Markdown("# K-means comme codec — MNIST")
+with gr.Blocks(title="K-means codec") as demo:
+    gr.Markdown("# K-means comme codec")
 
-    _models = list_models()
-    DEFAULT_NAME = "kmeans_k10_n1000"
+    _ds = get_dataset(DEFAULT_DATASET)
+    _n_train, _n_test = len(_ds.X_train), len(_ds.X_test)
+    _models = models_for(DEFAULT_DATASET)
+    DEFAULT_NAME = f"{DEFAULT_DATASET}_k10_n1000"
 
     # Doit refléter la valeur initiale de name_in : sync_name compare le nom
     # courant à ce témoin pour distinguer « auto » d'« édité à la main ». Les
     # désynchroniser ferait passer le nom par défaut pour une saisie utilisateur,
-    # et il ne suivrait plus jamais K/n_samples.
+    # et il ne suivrait plus jamais dataset/K/n_samples.
     auto_state = gr.State(DEFAULT_NAME)
 
     with gr.Row():
         with gr.Column(scale=1):
+            gr.Markdown("### Dataset")
+            dataset_dd = gr.Dropdown(
+                choices=[(label, key) for key, label in DATASETS.items()],
+                value=DEFAULT_DATASET,
+                label="Dataset actif (vaut pour tous les onglets)",
+                interactive=True,
+            )
+            dataset_md = gr.Markdown(
+                f"**{DATASETS[DEFAULT_DATASET]}**  \n{_n_train} images d'entraînement · "
+                f"{_n_test} de test · {len(_ds.class_names)} classes : "
+                f"{', '.join(_ds.class_names)}"
+            )
+
             gr.Markdown("### Modèle actif")
             model_dd = gr.Dropdown(
                 choices=_models,
                 value=_models[0] if _models else None,
-                label="Modèle entraîné",
+                label="Modèle entraîné (filtré par dataset)",
                 interactive=True,
             )
             delete_btn = gr.Button("Supprimer ce modèle", variant="stop", size="sm")
@@ -384,13 +501,15 @@ with gr.Blocks(title="K-means codec — MNIST") as demo:
                             minimum=1,
                             label="K — nombre de clusters (sans plafond)",
                         )
-                        n_in = gr.Number(
-                            value=1000,
-                            precision=0,
-                            minimum=1,
-                            maximum=len(X_TRAIN),
-                            label=f"Images d'entraînement (max {len(X_TRAIN)})",
-                        )
+                        with gr.Column(min_width=170):
+                            n_in = gr.Number(
+                                value=1000,
+                                precision=0,
+                                minimum=1,
+                                maximum=_n_train,
+                                label=f"Images d'entraînement (max {_n_train})",
+                            )
+                            max_train_btn = gr.Button("Tout le split train", size="sm")
                         seed_in = gr.Number(value=42, precision=0, label="Seed")
 
                     with gr.Row():
@@ -422,8 +541,8 @@ with gr.Blocks(title="K-means codec — MNIST") as demo:
                         value=10,
                         precision=0,
                         minimum=0,
-                        maximum=min(len(X_TRAIN), len(X_TEST)) - 1,
-                        label=f"Index de l'image (0 à {min(len(X_TRAIN), len(X_TEST)) - 1})",
+                        maximum=min(_n_train, _n_test) - 1,
+                        label=f"Index de l'image (0 à {min(_n_train, _n_test) - 1})",
                     )
 
                     codec_plot = gr.Plot(label="Train et Test — original vs reconstruction")
@@ -432,21 +551,22 @@ with gr.Blocks(title="K-means codec — MNIST") as demo:
                 # ----------------------------------------- Espace latent
                 with gr.Tab("Espace latent") as tab_latent:
                     gr.Markdown("## Espace latent")
-
                     gr.Markdown(
-                        "Les **deux splits projetés en une fois**. Test étant plus petit "
-                        f"({len(X_TEST)} images), il plafonne à sa taille."
+                        "Les **deux splits projetés en une fois**. Test étant plus petit, "
+                        "il plafonne à sa taille."
                     )
 
                     with gr.Row():
-                        nviz_in = gr.Number(
-                            value=1000,
-                            precision=0,
-                            minimum=1,
-                            maximum=len(X_TRAIN),
-                            label=f"Images à projeter (max {len(X_TRAIN)})",
-                        )
-                        true_in = gr.Checkbox(value=True, label="Comparer aux chiffres réels")
+                        with gr.Column(min_width=170):
+                            nviz_in = gr.Number(
+                                value=1000,
+                                precision=0,
+                                minimum=1,
+                                maximum=_n_train,
+                                label=f"Images à projeter (max {_n_train})",
+                            )
+                            max_viz_btn = gr.Button("Tout le split train", size="sm")
+                        true_in = gr.Checkbox(value=True, label="Comparer aux classes réelles")
 
                     latent_btn = gr.Button("Projeter train et test", variant="primary")
                     latent_plot_train = gr.Plot(label="TRAIN")
@@ -461,39 +581,67 @@ with gr.Blocks(title="K-means codec — MNIST") as demo:
 
     # ------------------------------------------------------------ Câblage
 
+    # Les boutons « Tout le split train » remplissent le champ avec le maximum du
+    # dataset actif — 60 000 sur MNIST, 25 715 sur Quick, Draw!.
+    max_train_btn.click(max_train_images, dataset_dd, n_in)
+    max_viz_btn.click(max_train_images, dataset_dd, nviz_in)
+
+    dataset_dd.change(
+        switch_dataset,
+        [dataset_dd, n_in, nviz_in, idx_in],
+        [
+            dataset_md,
+            model_dd,
+            model_md,
+            n_in,
+            nviz_in,
+            idx_in,
+            codec_plot,
+            codec_md,
+            latent_plot_train,
+            latent_plot_test,
+            latent_md,
+            centroids_plot,
+            centroids_md,
+        ],
+    )
+    dataset_dd.change(sync_name, [dataset_dd, k_in, n_in, name_in, auto_state], [name_in, auto_state])
+
     for widget in (k_in, n_in):
         widget.change(memory_note, [n_in, k_in], mem_md)
-        widget.change(sync_name, [k_in, n_in, name_in, auto_state], [name_in, auto_state])
+        widget.change(
+            sync_name, [dataset_dd, k_in, n_in, name_in, auto_state], [name_in, auto_state]
+        )
 
     train_btn.click(
         train,
-        [k_in, n_in, seed_in, iter_in, tol_in, name_in],
+        [dataset_dd, k_in, n_in, seed_in, iter_in, tol_in, name_in],
         [model_dd, model_md, status_md],
     )
-    delete_btn.click(remove_model, model_dd, [model_dd, model_md, status_md])
+    delete_btn.click(remove_model, [dataset_dd, model_dd], [model_dd, model_md, status_md])
     model_dd.change(describe_model, model_dd, model_md)
 
     # On ne recalcule que la vue regardée, jamais les trois autres.
     # Codec et Centroïdes sont bon marché (une image, K vignettes) : rendu
     # automatique à l'ouverture de l'onglet et à chaque changement de réglage.
-    codec_inputs = [model_dd, idx_in]
+    codec_inputs = [dataset_dd, model_dd, idx_in]
     codec_outputs = [codec_plot, codec_md]
     tab_codec.select(run_codec, codec_inputs, codec_outputs)
     for widget in (idx_in, model_dd):
         widget.change(run_codec, codec_inputs, codec_outputs)
 
-    # La projection latente n'est pas plafonnée et traite désormais les deux
-    # splits : elle peut coûter des minutes sur 60 000 images. Elle ne part donc
-    # QUE sur clic explicite — un rendu auto à l'ouverture figerait l'app.
+    # La projection latente n'est pas plafonnée et traite les deux splits : elle
+    # peut coûter des minutes sur 60 000 images. Elle ne part donc QUE sur clic
+    # explicite — un rendu auto à l'ouverture figerait l'app.
     latent_btn.click(
         run_latent,
-        [model_dd, nviz_in, true_in],
+        [dataset_dd, model_dd, nviz_in, true_in],
         [latent_plot_train, latent_plot_test, latent_md],
     )
 
     centroids_outputs = [centroids_plot, centroids_md]
-    tab_centroids.select(run_centroids, model_dd, centroids_outputs)
-    model_dd.change(run_centroids, model_dd, centroids_outputs)
+    tab_centroids.select(run_centroids, [dataset_dd, model_dd], centroids_outputs)
+    model_dd.change(run_centroids, [dataset_dd, model_dd], centroids_outputs)
 
 
 if __name__ == "__main__":

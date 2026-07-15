@@ -188,18 +188,21 @@ def _pca_2d(X, mean=None, components=None, n_iter=4, seed=0):
 
 def plot_latent_space(X, cluster_labels, centroids=None, y_true=None,
                       title="Espace latent K-means (projection PCA)", figsize=(8, 7),
-                      show=True):
+                      show=True, y_label="Chiffre réel"):
     """Affiche l'espace latent du K-means : données projetées en 2D (PCA),
     colorées par cluster.
 
     Args:
-        X:              (n, d) données d'origine (images MNIST aplaties).
+        X:              (n, d) données d'origine (images aplaties).
         cluster_labels: (n,) index de cluster de chaque point (sortie du K-means).
         centroids:      (k, d) centroïdes ; projetés et affichés si fournis.
         y_true:         (n,) labels réels ; ajoute un 2e nuage coloré par
-                        chiffre réel pour comparaison, si fourni.
+                        label réel pour comparaison, si fourni.
         title, figsize: options d'affichage.
         show:           True -> plt.show() (notebook) ; False -> retourne la figure (app).
+        y_label:        nom de ce que désignent les labels réels. « Chiffre réel »
+                        pour MNIST, mais « Classe réelle » pour Quick, Draw! —
+                        les catégories n'y sont pas des chiffres.
     """
     X = np.asarray(X, dtype=np.float32)
     cluster_labels = np.asarray(cluster_labels).astype(int).ravel()
@@ -244,10 +247,10 @@ def plot_latent_space(X, cluster_labels, centroids=None, y_true=None,
         ax = axes[1]
         scatter_true = ax.scatter(X_2d[:, 0], X_2d[:, 1], c=y_true,
                                   cmap="tab10", s=8, alpha=0.6)
-        ax.set_title("Même projection, colorée par chiffre réel")
+        ax.set_title(f"Même projection, colorée par {y_label.lower()}")
         ax.set_xlabel("Composante principale 1")
         ax.set_ylabel("Composante principale 2")
-        fig.colorbar(scatter_true, ax=ax, label="Chiffre réel")
+        fig.colorbar(scatter_true, ax=ax, label=y_label)
 
     fig.tight_layout()
     if show:
