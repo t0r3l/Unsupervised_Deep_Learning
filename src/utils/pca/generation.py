@@ -1,57 +1,46 @@
-"""Generate synthetic MNIST digits by sampling in PCA latent space.
+"""Generate synthetic images by sampling in PCA latent space.
 
-The idea is a simple *linear-Gaussian* generative model. We fit a PCA on the
-0/1/2 digit images to get a low-dimensional latent space, model the latent
-codes with a (multivariate) Gaussian, draw fresh latent vectors from that
-Gaussian, and `inverse_transform` them back into 28x28 pixel space. Fitting one
-Gaussian per digit class lets us generate a chosen digit on demand.
+A simple *linear-Gaussian* generative model: fit a PCA to get a low-dimensional
+latent space, model the latent codes with a (multivariate) Gaussian, draw fresh
+latent vectors from that Gaussian, and `inverse_transform` them back into 28x28
+pixel space. Fitting one Gaussian per class lets us generate a chosen class on
+demand.
+
+The PCA is **not** re-implemented here -- `fit_pca` / `PCA` come from
+`utils.pca.dim_reduction`, the project's single PCA. This module adds only the
+generation-specific pieces:
+
+    Model / sample:
+        - fit_latent_gaussian(pca, X, y):  Gaussian(s) over the latent codes
+        - sample_latent(mean, cov, n):     draw latent vectors
+        - generate(pca, latents):          decode latents -> images in [0, 1]
+        - interpolate(pca, a, b, n_steps):  walk between two latent codes
+    Plot (used by src/pca/generation.ipynb):
+        - plot_generated_grid(...):        a grid of freshly sampled images
+        - plot_real_vs_generated(...):     pixel mean vs decoded latent mean
+        - plot_interpolation(...):         a latent-space morph between two classes
 
 This is deliberately a baseline: PCA + a Gaussian can only capture *linear*,
-*unimodal* structure, so the samples look like smooth "average" digits rather
-than the crisp, varied strokes a nonlinear model (VAE/GAN) would produce.
-
-Contract (see src/utils/mnist_data.py):
-    X : np.ndarray, shape (n_samples, 784), float32 in [0, 1]
-    y : np.ndarray, shape (n_samples,), int  -- digit label per row
+*unimodal* structure, so samples look like smooth "average" images rather than
+the crisp, varied strokes a nonlinear model (VAE/GAN) would produce.
 """
 
 from __future__ import annotations
 
 import numpy as np
-from sklearn.decomposition import PCA
+
+from utils.pca.dim_reduction import PCA, fit_pca
 
 IMG_SIZE = 28
 N_FEATURES = IMG_SIZE * IMG_SIZE  # 784
-
-
-def fit_pca(X, n_components: int = 50) -> PCA:
-    """Fit a PCA that maps images (n, 784) to a `n_components`-dim latent space.
-
-    Returns
-    -------
-    sklearn.decomposition.PCA : the fitted PCA (use `.transform` /
-    `.inverse_transform` to move between pixel and latent space).
-    """
-    pca = PCA(n_components=n_components, random_state=0)
-    pca.fit(X)
-    return pca
 
 
 def fit_latent_gaussian(pca: PCA, X, y=None, ridge: float = 1e-6):
     """Fit a Gaussian to the PCA latent codes of `X`.
 
     The latent codes are `pca.transform(X)`. A small `ridge` is added to the
-    covariance diagonal so it stays positive-definite (numerically safe to
-    sample from). If `y` is given, one Gaussian is fitted per class.
-
-    Parameters
-    ----------
-    pca : fitted PCA
-    X : np.ndarray, shape (n, 784)
-    y : np.ndarray or None
-        If given, fit a separate Gaussian per unique label.
-    ridge : float
-        Amount added to the covariance diagonal for stability.
+    covariance diagonal so it stays positive-definite (safe to sample from). If
+    `y` is given, one Gaussian is fitted per class.
 
     Returns
     -------
@@ -76,32 +65,18 @@ def fit_latent_gaussian(pca: PCA, X, y=None, ridge: float = 1e-6):
 
 
 def sample_latent(mean, cov, n: int, seed: int = 0):
-    """Draw `n` latent vectors from the Gaussian ``N(mean, cov)``.
-
-    Returns
-    -------
-    np.ndarray, shape (n, d) : sampled latent codes.
-    """
+    """Draw `n` latent vectors from the Gaussian ``N(mean, cov)`` -> (n, d)."""
     rng = np.random.default_rng(seed)
     return rng.multivariate_normal(np.asarray(mean), np.asarray(cov), size=n)
 
 
 def generate(pca: PCA, latents, as_images: bool = False):
-    """Decode latent vectors into pixel-space images.
-
-    The latents are pushed through `pca.inverse_transform` and clipped to the
-    valid [0, 1] pixel range.
+    """Decode latent vectors into pixel-space images, clipped to [0, 1].
 
     Parameters
     ----------
-    pca : fitted PCA
-    latents : np.ndarray, shape (n, d)
     as_images : bool
         If True, return (n, 28, 28); otherwise flat (n, 784).
-
-    Returns
-    -------
-    np.ndarray : generated images, float in [0, 1].
     """
     imgs = pca.inverse_transform(np.asarray(latents))
     imgs = np.clip(imgs, 0.0, 1.0)
@@ -113,28 +88,76 @@ def generate(pca: PCA, latents, as_images: bool = False):
 def interpolate(pca: PCA, code_a, code_b, n_steps: int = 10, as_images: bool = False):
     """Linearly walk between two latent codes and decode each step.
 
-    Handy for visualising the latent space: pass the `pca.transform` codes of
-    two real digits to morph one into the other.
-
-    Parameters
-    ----------
-    pca : fitted PCA
-    code_a, code_b : np.ndarray, shape (d,)
-        Endpoint latent codes.
-    n_steps : int
-        Number of images along the path (inclusive of both endpoints).
-    as_images : bool
-        If True, return (n_steps, 28, 28); otherwise flat (n_steps, 784).
-
-    Returns
-    -------
-    np.ndarray : the interpolated, decoded images, float in [0, 1].
+    Pass the `pca.transform` codes of two real images to morph one into the
+    other. Returns the decoded images (n_steps, ...) in [0, 1].
     """
     code_a = np.asarray(code_a)
     code_b = np.asarray(code_b)
     ts = np.linspace(0.0, 1.0, n_steps)[:, None]
     path = (1.0 - ts) * code_a[None, :] + ts * code_b[None, :]
     return generate(pca, path, as_images=as_images)
+
+
+# --------------------------------------------------------------------------- #
+# Plotting (src/pca/generation.ipynb)
+# --------------------------------------------------------------------------- #
+def plot_generated_grid(pca: PCA, per_class, class_names, n_per_class=8,
+                        suptitle=None) -> None:
+    """Sample each class's Gaussian, decode, and show a grid (one class per row)."""
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(len(class_names), n_per_class,
+                             figsize=(n_per_class * 1.1, len(class_names) * 1.1))
+    for row, name in enumerate(class_names):
+        mean, cov = per_class[row]
+        imgs = generate(pca, sample_latent(mean, cov, n=n_per_class, seed=row), as_images=True)
+        for col in range(n_per_class):
+            axes[row, col].imshow(imgs[col], cmap="gray", vmin=0, vmax=1)
+            axes[row, col].set_xticks([]); axes[row, col].set_yticks([])
+        axes[row, 0].set_ylabel(name, fontsize=11, rotation=0, labelpad=25, va="center")
+    fig.suptitle(suptitle or "Newly generated images (one Gaussian per class)")
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_real_vs_generated(pca: PCA, X, y, per_class, class_names) -> None:
+    """Per class: the real pixel mean next to the decoded latent mean."""
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(len(class_names), 2, figsize=(3, len(class_names) * 1.4))
+    for row, name in enumerate(class_names):
+        real_mean = X[y == row].mean(axis=0)
+        mean, _ = per_class[row]
+        latent_mean_img = generate(pca, mean[None, :], as_images=True)[0]
+        axes[row, 0].imshow(real_mean.reshape(IMG_SIZE, IMG_SIZE), cmap="gray", vmin=0, vmax=1)
+        axes[row, 1].imshow(latent_mean_img, cmap="gray", vmin=0, vmax=1)
+        for col in range(2):
+            axes[row, col].set_xticks([]); axes[row, col].set_yticks([])
+        axes[row, 0].set_ylabel(name, rotation=0, labelpad=22, va="center")
+    axes[0, 0].set_title("pixel mean")
+    axes[0, 1].set_title("latent mean")
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_interpolation(pca: PCA, X, y, src_class, dst_class, class_names,
+                       n_steps=10) -> None:
+    """Interpolate in latent space between one real `src_class` and one `dst_class`."""
+    import matplotlib.pyplot as plt
+
+    idx_a = np.flatnonzero(y == src_class)[0]
+    idx_b = np.flatnonzero(y == dst_class)[0]
+    codes = pca.transform(X[[idx_a, idx_b]])
+    walk = interpolate(pca, codes[0], codes[1], n_steps=n_steps, as_images=True)
+
+    fig, axes = plt.subplots(1, n_steps, figsize=(n_steps * 1.0, 1.3))
+    for col in range(n_steps):
+        axes[col].imshow(walk[col], cmap="gray", vmin=0, vmax=1)
+        axes[col].set_xticks([]); axes[col].set_yticks([])
+    fig.suptitle(f"Latent-space interpolation:  real {class_names[src_class]}"
+                 f"  ->  real {class_names[dst_class]}")
+    plt.tight_layout()
+    plt.show()
 
 
 if __name__ == "__main__":
@@ -145,21 +168,11 @@ if __name__ == "__main__":
     print(f"PCA: {pca.n_components_} comps, "
           f"explained var {pca.explained_variance_ratio_.sum():.3f}")
 
-    # Overall Gaussian: sample a few digits.
-    mean, cov = fit_latent_gaussian(pca, X)
-    latents = sample_latent(mean, cov, n=5, seed=0)
-    samples = generate(pca, latents)
-    print(f"samples {samples.shape} {samples.dtype} "
-          f"range [{samples.min():.2f}, {samples.max():.2f}]")
-
-    # Per-class Gaussians.
     per_class = fit_latent_gaussian(pca, X, y=y)
     for label, (m, c) in per_class.items():
-        z = sample_latent(m, c, n=3, seed=label)
-        imgs = generate(pca, z, as_images=True)
-        print(f"digit {label}: generated {imgs.shape}")
+        imgs = generate(pca, sample_latent(m, c, n=3, seed=label), as_images=True)
+        print(f"class {label}: generated {imgs.shape}")
 
-    # Interpolation between two real digits.
     codes = pca.transform(X[:2])
     walk = interpolate(pca, codes[0], codes[1], n_steps=8, as_images=True)
     print(f"interpolation {walk.shape}")
