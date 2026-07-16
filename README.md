@@ -119,6 +119,34 @@ class, and displays a sample sketch from every category.
 jupyter notebook src/exploration.ipynb
 ```
 
+## Tester les modèles — app interactive
+
+`src/kmeas/` contient une app **Gradio** pour entraîner et explorer les K-means (le
+K-means y est vu comme un **codec** : chaque image se résume à l'indice de son
+centroïde). Elle se lance comme un script Python normal :
+
+```bash
+cd src/kmeas
+python app.py                 # ouvre http://127.0.0.1:7860 dans le navigateur
+```
+
+Le **dataset se choisit dans l'app** (MNIST ou Quick, Draw!) et vaut pour tous les
+onglets ; il est chargé via `src/data_import.py`. Quatre onglets :
+
+- **Entraînement** — K, nombre d'images, seed, itérations, tolérance. K et les
+  itérations n'ont pas de plafond, les images montent jusqu'à tout le split train.
+- **Compression / Décompression** — une image → un entier → sa reconstruction, sur
+  les deux splits à la fois.
+- **Espace latent** — projection PCA colorée par cluster, train et test en une fois.
+- **Centroïdes** — tous les centroïdes appris, le dictionnaire du codec.
+
+Les modèles sont sauvegardés en `.npz` sous `src/kmeas/models/`, estampillés de leur
+algo et de leur dataset : le sélecteur ne propose que ceux qui correspondent à la vue
+courante.
+
+> Le premier démarrage prend ~20 s : c'est l'import de TensorFlow et le chargement du
+> dataset, une seule fois par lancement.
+
 ## Workflow
 
 1. Pick **3–6 categories** and load their `.npy` bitmaps into one array `X` with a
