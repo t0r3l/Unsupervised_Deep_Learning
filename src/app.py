@@ -60,6 +60,14 @@ DEFAULT_ALGO = next(iter(ALGOS))
 IMAGE_DIM = 784
 DEFAULT_DATASET = "mnist"
 
+# Plafond des figures de compression : au-delà, les vignettes deviennent illisibles.
+# Rien à voir avec le coût de calcul — c'est la largeur de la figure qui borne.
+MAX_CODEC_IMAGES = 30
+
+# Réglages par ligne dans l'onglet Entraînement. Le SOM en a 7 : sur une seule
+# ligne, chacun se réduit à une bande trop étroite pour lire son libellé.
+PARAMS_PER_ROW = 4
+
 NO_MODEL = "⚠️ Sélectionne ou entraîne un modèle d'abord."
 
 # Les datasets restent en mémoire une fois chargés : MNIST coûte ~10 s (import
@@ -145,17 +153,28 @@ PARAM_SLOTS = []          # [(algo_key, param_name), ...] — même ordre que le
 
 
 def build_param_widget(param):
+    """Le widget d'un Param.
+
+    `step` n'est pas cosmétique. Les valeurs légales d'un gr.Number sont
+    `minimum + n · step`, et son step vaut 1 PAR DÉFAUT : un champ flottant qui
+    ne le précise pas n'accepte donc que des valeurs espacées de 1. Alpha (0 à 1)
+    n'y avait plus que deux valeurs possibles, et son propre défaut n'en faisait
+    pas partie — le champ était inéditable. Param.__post_init__ verrouille
+    maintenant cette cohérence au démarrage.
+    """
     if param.kind == "choice":
-        return gr.Dropdown(choices=param.choices, value=param.default, label=param.label)
-    if param.kind == "float":
-        return gr.Number(
-            value=param.default, label=param.label,
-            minimum=param.minimum, maximum=param.maximum,
+        return gr.Dropdown(
+            choices=param.choices, value=param.default,
+            label=param.label, info=param.info,
         )
-    return gr.Number(
-        value=param.default, precision=0, label=param.label,
+
+    common = dict(
+        value=param.default, label=param.label, info=param.info,
         minimum=param.minimum, maximum=param.maximum,
     )
+    if param.kind == "float":
+        return gr.Number(step=float(param.step or 0.01), **common)
+    return gr.Number(precision=0, step=int(param.step or 1), **common)
 
 
 def collect_params(algo_key, values, n_samples=None):
@@ -173,24 +192,53 @@ def collect_params(algo_key, values, n_samples=None):
 # ------------------------------------------------------------------ Modèles
 
 
+# Lire les métadonnées d'un modèle coûte la décompression du .npz entier — poids
+# compris. models_for() les relit pour TOUT le registre à chaque changement d'algo
+# ou de dataset, et chaque vue vérifie son modèle avant de tracer : sans cache, on
+# décompresserait des dizaines de Mo pour lire deux clés. Les registres ne bougent
+# que par cette app, qui invalide ce qu'elle écrit ; un rechargement de page repart
+# de toute façon à zéro.
+_META_CACHE = {}          # (algo_key, nom) -> meta
+
+
+def model_meta(algo_key, name):
+    """Métadonnées du modèle, ou None s'il n'existe pas / est illisible."""
+    cached = _META_CACHE.get((algo_key, name))
+    if cached is not None:
+        return cached
+    try:
+        _, meta = ALGOS[algo_key].load(name)
+    except Exception:
+        return None  # absent, .npz corrompu ou d'un format plus ancien
+    _META_CACHE[(algo_key, name)] = meta
+    return meta
+
+
 def models_for(algo_key, ds_key):
     """Modèles de cet algo entraînés sur ce dataset.
 
     Le registre d'un algo ne contient que ses modèles : reste à filtrer sur le
     dataset, que les métadonnées portent.
     """
-    algo = ALGOS[algo_key]
     out = []
-    for name in algo.list_models():
-        try:
-            _, meta = algo.load(name)
-        except Exception:
-            continue  # .npz corrompu ou d'un format plus ancien : on l'ignore
+    for name in ALGOS[algo_key].list_models():
+        meta = model_meta(algo_key, name)
         # Les modèles d'avant ces clés n'en ont aucune : ils ont tous été
         # entraînés sur MNIST, d'où cette valeur par défaut.
-        if meta.get("dataset", "mnist") == ds_key:
+        if meta is not None and meta.get("dataset", "mnist") == ds_key:
             out.append(name)
     return out
+
+
+def active_model(algo_key, ds_key, name):
+    """Le nom demandé s'il désigne vraiment un modèle de cet algo ET ce dataset.
+
+    Le navigateur envoie la valeur que le sélecteur avait au moment du clic. Un
+    changement d'algo repeuple ce sélecteur, mais les vues déjà parties gardent
+    l'ancien nom — un K-means demandé au registre Kohonen. Le rejeter donne une
+    vue vide le temps que le sélecteur se cale, plutôt qu'une exception.
+    """
+    return name if name and name in models_for(algo_key, ds_key) else None
 
 
 def model_choices(algo_key, ds_key, selected=None):
@@ -214,12 +262,13 @@ def load_active(algo_key, name):
 
 
 def describe_model(algo_key, name):
-    if not name:
+    algo = ALGOS[algo_key]
+    meta = model_meta(algo_key, name) if name else None
+    if meta is None:
         return (
             "ℹ️ Aucun modèle pour cet algo et ce dataset. Entraînes-en un dans "
             "l'onglet **Entraînement**."
         )
-    algo, _, meta = load_active(algo_key, name)
     rows = "\n".join(f"| **{k}** | {v} |" for k, v in algo.describe_rows(meta))
     return (
         f"### `{name}`\n"
@@ -280,11 +329,33 @@ def max_train_images(ds_key):
     return len(get_dataset(ds_key).X_train)
 
 
+def refresh_models(algo_key, ds_key, name):
+    """Relit le registre depuis le disque et repeuple le sélecteur.
+
+    Gradio fige les `choices` d'un Dropdown dans la config envoyée au navigateur au
+    DÉMARRAGE du serveur. Un gr.update() les corrige dans la page ouverte, mais un
+    F5 recharge cette config d'origine : les modèles entraînés depuis semblent
+    perdus. Ils sont bien sur le disque — c'est la liste qui datait. D'où ce
+    rappel à chaque chargement de page, seul moment où le cache peut aussi se
+    vider sans risque.
+    """
+    _META_CACHE.clear()
+    update, selected = model_choices(algo_key, ds_key, name)
+    return update, describe_model(algo_key, selected)
+
+
 def cleared_views():
     """Les sorties des onglets, vidées. Un changement d'algo ou de dataset rend
-    les figures affichées caduques : mieux vaut du vide qu'un faux repère."""
-    return (None, None, "", None, None, None, None, "", None, "", None, "",
-            None, None, "")
+    les figures affichées caduques : mieux vaut du vide qu'un faux repère.
+
+    Déduit des composants plutôt qu'écrit à la main : un Plot se vide avec None,
+    un Markdown avec "", et une liste de 15 littéraux tenue en parallèle de
+    VIEW_OUTPUTS finit par se décaler. Quand ça arrive, Gradio rejette la réponse
+    ENTIÈRE — y compris la mise à jour du sélecteur de modèle, qui semble alors ne
+    plus filtrer par algo. VIEW_OUTPUTS n'existe qu'après la construction de l'UI,
+    mais cette fonction n'est appelée qu'au moment d'une requête : c'est assez tôt.
+    """
+    return tuple("" if isinstance(c, gr.Markdown) else None for c in VIEW_OUTPUTS)
 
 
 def switch_algo(algo_key, ds_key):
@@ -303,7 +374,7 @@ def switch_algo(algo_key, ds_key):
     )
 
 
-def switch_dataset(algo_key, ds_key, n_cur, nviz_cur, progress=gr.Progress()):
+def switch_dataset(algo_key, ds_key, n_cur, nviz_cur, export_nviz_cur, progress=gr.Progress()):
     """Change le dataset actif : recharge, refiltre les modèles, réajuste l'UI."""
     ds = get_dataset(ds_key, progress=progress)
     n_train, n_test = len(ds.X_train), len(ds.X_test)
@@ -326,6 +397,8 @@ def switch_dataset(algo_key, ds_key, n_cur, nviz_cur, progress=gr.Progress()):
         gr.update(maximum=n_train, value=clamp(n_cur, n_train),
                   label=f"Images d'entraînement (max {n_train})"),
         gr.update(maximum=n_train, value=clamp(nviz_cur, n_train),
+                  label=f"Images à projeter (max {n_train})"),
+        gr.update(maximum=n_train, value=clamp(export_nviz_cur, n_train),
                   label=f"Images à projeter (max {n_train})"),
         *cleared_views(),
     )
@@ -372,6 +445,8 @@ def train(algo_key, ds_key, n_samples, name, *values):
     weights, meta = algo.train(X_fit, params)
     meta.update({"algo": algo_key, "dataset": ds_key, "n_samples": n_samples})
     algo.save(name, weights, meta)
+    # Réentraîner sous un nom existant écrase le .npz : le cache doit suivre.
+    _META_CACHE.pop((algo_key, name), None)
 
     history = history_of(meta)
     status = (
@@ -385,9 +460,10 @@ def train(algo_key, ds_key, n_samples, name, *values):
 
 
 def remove_model(algo_key, ds_key, name):
-    if not name:
+    if not active_model(algo_key, ds_key, name):
         raise gr.Error("Aucun modèle sélectionné.")
     ALGOS[algo_key].delete(name)
+    _META_CACHE.pop((algo_key, name), None)
     update, selected = model_choices(algo_key, ds_key)
     return update, describe_model(algo_key, selected), f"🗑️ Modèle **{name}** supprimé."
 
@@ -399,12 +475,13 @@ def reroll_seed():
 
 def run_codec(algo_key, ds_key, name, n_images, seed):
     """Encode/décode n images tirées au hasard, une figure par split."""
+    name = active_model(algo_key, ds_key, name)
     if not name:
         return None, None, NO_MODEL
 
     ds = get_dataset(ds_key)
     algo, weights, meta = load_active(algo_key, name)
-    n_images = int(np.clip(int(n_images or 1), 1, 30))
+    n_images = int(np.clip(int(n_images or 1), 1, MAX_CODEC_IMAGES))
 
     figures, stats = [], {}
     for split in ("Train", "Test"):
@@ -454,6 +531,7 @@ def run_codec(algo_key, ds_key, name, n_images, seed):
 
 def run_latent(algo_key, ds_key, name, n_viz, show_true):
     """Projette les deux splits d'un coup : nuage + distribution des classes."""
+    name = active_model(algo_key, ds_key, name)
     if not name:
         return None, None, None, None, NO_MODEL
 
@@ -517,6 +595,7 @@ def run_latent(algo_key, ds_key, name, n_viz, show_true):
 
 def run_dictionary(algo_key, ds_key, name, n_viz=2000):
     """Le dictionnaire appris — centroïdes, feature vectors… selon l'algo."""
+    name = active_model(algo_key, ds_key, name)
     if not name:
         return None, NO_MODEL
 
@@ -531,6 +610,7 @@ def run_dictionary(algo_key, ds_key, name, n_viz=2000):
 
 def run_extra(algo_key, ds_key, name, n_viz=2000):
     """Les vues propres à l'algo — au plus 2, masquées s'il n'en a pas."""
+    name = active_model(algo_key, ds_key, name)
     if not name:
         return gr.update(visible=False), gr.update(visible=False), NO_MODEL
 
@@ -561,6 +641,7 @@ def run_extra(algo_key, ds_key, name, n_viz=2000):
 
 def run_curve(algo_key, ds_key, name):
     """Courbe d'entraînement du modèle sélectionné."""
+    name = active_model(algo_key, ds_key, name)
     if not name:
         return None, NO_MODEL
 
@@ -586,14 +667,14 @@ def export_all(algo_key, ds_key, name, n_viz, n_images, seed, progress=gr.Progre
     en un clic. Les figures sont écrites sur disque plutôt que rendues en base64 :
     c'est ce qui permet le téléchargement et le clic droit « copier l'image ».
     """
-    if not name:
+    if not active_model(algo_key, ds_key, name):
         raise gr.Error("Sélectionne ou entraîne un modèle d'abord.")
 
     ds = get_dataset(ds_key)
     algo, weights, meta = load_active(algo_key, name)
 
     n_viz = int(np.clip(int(n_viz or 1), 1, len(ds.X_train)))
-    n_images = int(np.clip(int(n_images or 10), 1, 30))
+    n_images = int(np.clip(int(n_images or 10), 1, MAX_CODEC_IMAGES))
     seed = int(seed or 0)
 
     out_dir = Path(tempfile.mkdtemp(prefix="rapport_"))
@@ -724,6 +805,12 @@ with gr.Blocks(title="Codecs non supervisés") as demo:
                 value=_models[0] if _models else None,
                 label=f"Modèle {_algo.label} (filtré par dataset)",
                 interactive=True,
+                # Changer d'algo repeuple ce sélecteur, mais les vues déjà parties
+                # portent encore l'ancien nom — un K-means dans une liste Kohonen.
+                # Sans ça, Gradio refuse cette valeur AVANT d'appeler le handler
+                # (« … is not in the list of choices ») et l'onglet part en erreur
+                # au lieu de se vider. active_model() la rejette proprement, lui.
+                allow_custom_value=True,
             )
             delete_btn = gr.Button("Supprimer ce modèle", variant="stop", size="sm")
             model_md = gr.Markdown(
@@ -751,10 +838,14 @@ with gr.Blocks(title="Codecs non supervisés") as demo:
                     for key, algo in ALGOS.items():
                         with gr.Group(visible=(key == DEFAULT_ALGO)) as group:
                             gr.Markdown(f"**Hyperparamètres — {algo.label}**")
-                            with gr.Row():
-                                for param in algo.params:
-                                    param_widgets.append(build_param_widget(param))
-                                    PARAM_SLOTS.append((key, param.name))
+                            # Par lignes de PARAMS_PER_ROW : les 7 réglages du SOM
+                            # tenaient sur une seule ligne, chacun réduit à une
+                            # bande trop étroite pour lire son libellé.
+                            for start in range(0, len(algo.params), PARAMS_PER_ROW):
+                                with gr.Row():
+                                    for param in algo.params[start:start + PARAMS_PER_ROW]:
+                                        param_widgets.append(build_param_widget(param))
+                                        PARAM_SLOTS.append((key, param.name))
                         param_groups[key] = group
 
                     mem_md = gr.Markdown(
@@ -773,10 +864,12 @@ with gr.Blocks(title="Codecs non supervisés") as demo:
                     )
 
                     with gr.Row():
-                        codec_n_in = gr.Number(
-                            value=10, precision=0, minimum=1, maximum=30,
-                            label="Images par split (max 30)",
-                        )
+                        with gr.Column(min_width=170):
+                            codec_n_in = gr.Number(
+                                value=10, precision=0, minimum=1, maximum=MAX_CODEC_IMAGES,
+                                label=f"Images par split (max {MAX_CODEC_IMAGES})",
+                            )
+                            codec_max_btn = gr.Button(f"Max ({MAX_CODEC_IMAGES})", size="sm")
                         codec_seed_in = gr.Number(value=0, precision=0, label="Graine du tirage")
                         codec_reroll_btn = gr.Button("Nouveau tirage aléatoire")
 
@@ -843,15 +936,25 @@ with gr.Blocks(title="Codecs non supervisés") as demo:
                     )
 
                     with gr.Row():
-                        export_n_images = gr.Number(
-                            value=10, precision=0, minimum=1, maximum=30,
-                            label="Images par split (compression)",
-                        )
-                        export_seed = gr.Number(value=0, precision=0, label="Graine du tirage")
-                        export_nviz = gr.Number(
-                            value=1000, precision=0, minimum=1,
-                            label="Images à projeter (espaces latents)",
-                        )
+                        with gr.Column(min_width=170):
+                            export_n_images = gr.Number(
+                                value=10, precision=0, minimum=1, maximum=MAX_CODEC_IMAGES,
+                                label="Images par split (compression)",
+                            )
+                            export_max_images_btn = gr.Button(
+                                f"Max ({MAX_CODEC_IMAGES})", size="sm"
+                            )
+                        with gr.Column(min_width=170):
+                            export_seed = gr.Number(
+                                value=0, precision=0, label="Graine du tirage"
+                            )
+                            export_reroll_btn = gr.Button("Nouveau tirage", size="sm")
+                        with gr.Column(min_width=170):
+                            export_nviz = gr.Number(
+                                value=1000, precision=0, minimum=1, maximum=_n_train,
+                                label=f"Images à projeter (max {_n_train})",
+                            )
+                            export_max_viz_btn = gr.Button("Tout le split train", size="sm")
 
                     export_btn = gr.Button("Générer toutes les figures", variant="primary")
                     export_zip = gr.File(label="Archive ZIP — toutes les images")
@@ -875,6 +978,16 @@ with gr.Blocks(title="Codecs non supervisés") as demo:
     # dataset actif — 60 000 sur MNIST, 25 715 sur Quick, Draw!.
     max_train_btn.click(max_train_images, dataset_dd, n_in)
     max_viz_btn.click(max_train_images, dataset_dd, nviz_in)
+    export_max_viz_btn.click(max_train_images, dataset_dd, export_nviz)
+
+    # Les plafonds constants n'ont pas besoin du serveur pour être connus.
+    codec_max_btn.click(lambda: MAX_CODEC_IMAGES, None, codec_n_in)
+    export_max_images_btn.click(lambda: MAX_CODEC_IMAGES, None, export_n_images)
+    export_reroll_btn.click(reroll_seed, None, export_seed)
+
+    # Repeuple le sélecteur à chaque ouverture ou rechargement de page : les
+    # choices figées dans la config datent du démarrage du serveur.
+    demo.load(refresh_models, [algo_dd, dataset_dd, model_dd], [model_dd, model_md])
 
     algo_dd.change(
         switch_algo,
@@ -891,8 +1004,8 @@ with gr.Blocks(title="Codecs non supervisés") as demo:
 
     dataset_dd.change(
         switch_dataset,
-        [algo_dd, dataset_dd, n_in, nviz_in],
-        [dataset_md, model_dd, model_md, n_in, nviz_in, *VIEW_OUTPUTS],
+        [algo_dd, dataset_dd, n_in, nviz_in, export_nviz],
+        [dataset_md, model_dd, model_md, n_in, nviz_in, export_nviz, *VIEW_OUTPUTS],
     )
     dataset_dd.change(
         sync_name,

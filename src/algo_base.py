@@ -69,6 +69,43 @@ class Param:
     maximum: Any = None
     choices: Any = None             # [(libellé, valeur), ...] pour kind="choice"
     info: str = ""                  # aide sous le widget
+    step: Any = None                # granularité ; 1 (int) ou 0.01 (float) si None
+
+    def __post_init__(self):
+        """Refuse un défaut que le widget lui-même rejetterait.
+
+        Les valeurs légales d'un champ numérique sont `minimum + n · step` — et
+        RIEN d'autre. Un défaut hors de cette grille produit un champ né invalide,
+        que le navigateur refuse de modifier : le paramètre devient inatteignable
+        sans le moindre message d'erreur. C'est exactement ce qui est arrivé à
+        alpha (défaut 0,1 avec minimum=0,0001 et step=1 : légal = 0,0001 / 1,0001 /
+        2,0001…). Le piège est silencieux, donc il se re-tendra : autant qu'il
+        casse ici, au démarrage, plutôt que dans l'UI.
+        """
+        if self.kind not in ("int", "float", "choice"):
+            raise ValueError(f"{self.name} : kind inconnu {self.kind!r}.")
+        if self.kind == "choice":
+            values = [v for _, v in (self.choices or [])]
+            if self.default not in values:
+                raise ValueError(
+                    f"{self.name} : défaut {self.default!r} absent des choix {values}."
+                )
+            return
+
+        step = self.step if self.step is not None else (1 if self.kind == "int" else 0.01)
+        if step <= 0:
+            raise ValueError(f"{self.name} : step doit être strictement positif.")
+
+        base = self.minimum if self.minimum is not None else 0
+        offsets = (self.default - base) / step
+        if abs(offsets - round(offsets)) > 1e-6:
+            raise ValueError(
+                f"{self.name} : défaut {self.default} inatteignable — les valeurs "
+                f"légales sont {base} + n × {step}. Aligne le défaut, le minimum "
+                f"ou le step."
+            )
+        if self.maximum is not None and self.default > self.maximum:
+            raise ValueError(f"{self.name} : défaut {self.default} > maximum {self.maximum}.")
 
 
 class Algo:

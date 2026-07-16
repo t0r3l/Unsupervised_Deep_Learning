@@ -47,13 +47,17 @@ class KMeans(Algo):
     k_label = "K — nombre de clusters"
 
     params = [
-        Param("k", "K — nombre de clusters (sans plafond)", "int", 10, minimum=1),
-        Param("max_iter", "Itérations max (sans plafond)", "int", 100, minimum=1),
+        Param("k", "K — nombre de clusters (sans plafond)", "int", 10, minimum=1,
+              info="La taille du dictionnaire, donc le taux de compression."),
+        Param("max_iter", "Itérations max (sans plafond)", "int", 100, minimum=1,
+              info="Plafond : la boucle s'arrête d'elle-même à convergence."),
         Param(
             "tolerance", "Tolérance de convergence", "choice", 1e-4,
             choices=[("1e-6", 1e-6), ("1e-5", 1e-5), ("1e-4", 1e-4), ("1e-3", 1e-3)],
+            info="Déplacement des centroïdes sous lequel on considère avoir convergé.",
         ),
-        Param("seed", "Seed", "int", 42),
+        Param("seed", "Seed", "int", 42, minimum=0,
+              info="Tirage des centroïdes initiaux."),
     ]
 
     # ------------------------------------------------------------ Entraînement

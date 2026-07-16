@@ -38,19 +38,35 @@ class Kohonen(Algo):
     code_label = "feature vector"
     k_label = "Neurones (lignes × colonnes)"
 
+    # minimum=0 et non 0,0001 pour alpha et gamma : les valeurs légales d'un champ
+    # sont `minimum + n · step`, donc un minimum non aligné sur le step rend toute
+    # la grille de valeurs bancale (0,0001 / 0,0101 / 0,0201…). Zéro est aligné sur
+    # n'importe quel step ; c'est check() qui refuse le zéro lui-même, côté serveur.
     params = [
-        Param("rows", "Lignes de la grille", "int", 10, minimum=1),
-        Param("cols", "Colonnes de la grille", "int", 10, minimum=1),
+        Param("rows", "Lignes de la grille", "int", 10, minimum=1,
+              info="k = lignes × colonnes"),
+        Param("cols", "Colonnes de la grille", "int", 10, minimum=1,
+              info="k = lignes × colonnes"),
         Param(
             "topology", "Topologie", "choice", "hex",
             choices=[("Hexagonale — 6 voisins équidistants", "hex"),
                      ("Rectangulaire — 4 voisins + 4 diagonales", "rect")],
+            info="Qui est voisin de qui, donc qui reçoit la correction.",
         ),
         Param("alpha", "Alpha — pas d'apprentissage", "float", 0.1,
-              minimum=0.0001, maximum=1.0),
-        Param("gamma", "Gamma — largeur du voisinage", "float", 1.0, minimum=0.0001),
-        Param("n_epochs", "Époques", "int", 8, minimum=1),
-        Param("seed", "Seed", "int", 42),
+              minimum=0.0, maximum=1.0, step=0.01,
+              info="Part du chemin vers l'exemple parcourue à chaque présentation. "
+                   "Grand = rapide mais oscille davantage."),
+        Param("gamma", "Gamma — largeur du voisinage", "float", 1.0,
+              minimum=0.0, step=0.05,
+              info="Portée du voisinage, en cases de grille. À 1, un voisin direct "
+                   "reçoit 61 % de la correction. Sous ~0,25 le SOM dégénère en "
+                   "K-means (plus d'organisation) ; au-delà de ~5 tous les neurones "
+                   "apprennent la même image. À réajuster si tu changes la grille."),
+        Param("n_epochs", "Époques", "int", 8, minimum=1,
+              info="À alpha constant, l'essentiel de la descente tient dans la 1re."),
+        Param("seed", "Seed", "int", 42, minimum=0,
+              info="Tirage initial + ordre de présentation."),
     ]
 
     # ------------------------------------------------------------ Entraînement
