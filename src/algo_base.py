@@ -32,8 +32,11 @@ TensorFlow et le SOM en numpy, mais ça ne regarde pas l'app. Chaque adaptateur
 convertit.
 """
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
+
+IMAGE_DIM = 784
 
 
 def history_of(meta):
@@ -209,13 +212,79 @@ class Algo:
         raise NotImplementedError
 
     def extra_figures(self, weights, meta, labels, y_true, class_names):
-        """Vues propres à l'algo — [(titre, figure), ...], au plus 2.
+        """Vues propres à l'algo — [(titre, figure), ...].
 
         C'est l'échappatoire de l'interface : l'U-matrix n'a de sens que pour un
         SOM, la cartographie triée par taille que pour un K-means. Plutôt que de
         forcer tous les algos dans les mêmes vues, chacun ajoute les siennes.
+        L'app expose un nombre fixe d'emplacements (MAX_EXTRA_FIGURES) et masque
+        ceux qui restent vides.
         """
         return []
+
+    def extra_figures_with_data(self, X, weights, meta, labels, y_true, class_names):
+        """Comme extra_figures, mais avec les images en plus.
+
+        Certains algos n'ont besoin que de leurs poids pour leurs vues propres
+        (U-matrix, cartographie) — d'autres ont besoin des DONNÉES : la PCA
+        refait des décompositions sur X (comparaison des centrages), ajuste des
+        gaussiennes latentes (génération) ou interpole entre deux images.
+
+        Le défaut délègue à extra_figures : K-means et Kohonen n'ont rien à
+        changer, seuls les algos gourmands en données surchargent celle-ci.
+        """
+        return self.extra_figures(weights, meta, labels, y_true, class_names)
+
+    # ------------------------------------------------------------------ Récits
+
+    # Les textes sous les figures dépendent du CODEC, pas seulement des nombres :
+    # K-means transmet UN entier, la PCA k flottants — un texte unique dans l'app
+    # mentirait forcément pour l'un des deux. Les défauts ci-dessous racontent le
+    # codec à code discret (K-means, SOM) ; la PCA les remplace entièrement.
+
+    def codec_note(self, meta, ds_key, n_images, seed, stats):
+        """Texte de l'onglet Compression / Décompression.
+
+        stats : {"Train": codes distincts, "Test": codes distincts} sur le tirage.
+        """
+        k = int(meta["k"])
+        bits = math.ceil(math.log2(k)) if k > 1 else 0
+        ratio = float("inf") if bits == 0 else IMAGE_DIM * 8 / bits
+        mse = meta["inertia"] / (meta["n_samples"] * IMAGE_DIM)
+        return (
+            f"**{n_images} images tirées au hasard** dans chaque split de **{ds_key}**, "
+            f"encodées par **{self.label}** (graine {seed} — relance le tirage "
+            f"pour en voir d'autres).\n\n"
+            f"Chaque image (784 pixels) est transmise sous la forme d'**un seul entier**, "
+            f"soit {bits} bits pour k={k} — un taux de compression de **{ratio:.0f}:1** "
+            f"face aux {IMAGE_DIM * 8} bits de l'image brute (le dictionnaire des "
+            f"{self.dict_label.lower()} n'étant transmis qu'une fois).\n\n"
+            f"Le décodeur renvoie le {self.code_label} portant ce numéro : deux images "
+            f"partageant un code se reconstruisent **à l'identique** — visible dès que deux "
+            f"colonnes ont le même code.\n\n"
+            f"Le prix de cette compression est la **MSE : {mse:.4f}** par pixel (mesurée sur "
+            f"le train à l'entraînement). C'est l'écart entre la ligne du haut et celle du "
+            f"bas.\n\n"
+            f"Codes distincts sur ce tirage : {stats['Train']}/{n_images} en train, "
+            f"{stats['Test']}/{n_images} en test."
+        )
+
+    def latent_note(self, meta):
+        """Paragraphe « qu'est-ce que cet espace latent » de l'onglet Espace latent."""
+        return (
+            f"Rappel : le vrai espace latent de ce codec est **un entier discret** dans "
+            f"{{0, …, {int(meta['k']) - 1}}}. Ces nuages sont une *projection PCA des "
+            f"données* en 2D colorée par code — une vue de la structure trouvée, pas "
+            f"l'espace latent lui-même.\n\n"
+            "⚠️ Chaque split calcule **sa propre** PCA : les axes des deux figures ne sont "
+            "pas les mêmes repères. Compare les *formes* des groupes, pas les positions — "
+            "un nuage peut apparaître mirroité, le signe des composantes étant arbitraire.\n\n"
+            "**Distribution** : un groupe de barres par code, une barre par classe réelle. "
+            "Un groupe dominé par une seule barre = code pur ; plusieurs barres de hauteur "
+            "voisine = code qui mélange des classes. La pureté indiquée est la part des "
+            "images tombant dans un groupe où leur classe est majoritaire — c'est ce que "
+            "l'inertie ne mesure **pas**."
+        )
 
     def describe_rows(self, meta):
         """Métadonnées du modèle en lignes (libellé, valeur)."""

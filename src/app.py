@@ -49,12 +49,13 @@ from algo_base import history_of  # noqa: E402
 from data_import import DATASETS, load_dataset  # noqa: E402
 from kmeas.algo import KMeans  # noqa: E402
 from kohonen.algo import Kohonen  # noqa: E402
+from pca.algo import PCAAlgo  # noqa: E402
 
 # Le catalogue des algos — la SEULE chose que ce fichier sait d'eux. Chaque algo
 # vit chez lui (src/kmeas/algo.py, src/kohonen/algo.py) et présente l'interface
 # Algo (algo_base.py) ; ajouter un algo se limite donc à cette ligne.
 # L'ordre fixe celui du sélecteur ; la première entrée est l'algo par défaut.
-ALGOS = {algo.key: algo for algo in (KMeans(), Kohonen())}
+ALGOS = {algo.key: algo for algo in (KMeans(), Kohonen(), PCAAlgo())}
 DEFAULT_ALGO = next(iter(ALGOS))
 
 IMAGE_DIM = 784
@@ -67,6 +68,11 @@ MAX_CODEC_IMAGES = 30
 # Réglages par ligne dans l'onglet Entraînement. Le SOM en a 7 : sur une seule
 # ligne, chacun se réduit à une bande trop étroite pour lire son libellé.
 PARAMS_PER_ROW = 4
+
+# Emplacements de figures dans l'onglet « Vues de l'algo ». K-means en montre 1,
+# le SOM 2, la PCA jusqu'à 9 (spectre, heatmaps, centrage, génération…) : on crée
+# le maximum d'emplacements et run_extra masque ceux qui restent vides.
+MAX_EXTRA_FIGURES = 10
 
 NO_MODEL = "⚠️ Sélectionne ou entraîne un modèle d'abord."
 
@@ -504,28 +510,10 @@ def run_codec(algo_key, ds_key, name, n_images, seed):
             f"{split.upper()} — {len(idx)} images tirées au hasard",
         )))
 
-    k = int(meta["k"])
-    bits = int(np.ceil(np.log2(k))) if k > 1 else 0
-    ratio = float("inf") if bits == 0 else IMAGE_DIM * 8 / bits
-    mse = meta["inertia"] / (meta["n_samples"] * IMAGE_DIM)
-
-    info = (
-        f"**{n_images} images tirées au hasard** dans chaque split de **{ds_key}**, "
-        f"encodées par **{algo.label}** (graine {int(seed or 0)} — relance le tirage "
-        f"pour en voir d'autres).\n\n"
-        f"Chaque image (784 pixels) est transmise sous la forme d'**un seul entier**, "
-        f"soit {bits} bits pour k={k} — un taux de compression de **{ratio:.0f}:1** "
-        f"face aux {IMAGE_DIM * 8} bits de l'image brute (le dictionnaire des "
-        f"{algo.dict_label.lower()} n'étant transmis qu'une fois).\n\n"
-        f"Le décodeur renvoie le {algo.code_label} portant ce numéro : deux images "
-        f"partageant un code se reconstruisent **à l'identique** — visible dès que deux "
-        f"colonnes ont le même code.\n\n"
-        f"Le prix de cette compression est la **MSE : {mse:.4f}** par pixel (mesurée sur "
-        f"le train à l'entraînement). C'est l'écart entre la ligne du haut et celle du "
-        f"bas.\n\n"
-        f"Codes distincts sur ce tirage : {stats['Train']}/{n_images} en train, "
-        f"{stats['Test']}/{n_images} en test."
-    )
+    # Le récit de la compression appartient à l'algo : K-means transmet UN
+    # entier, la PCA k flottants — un texte unique ici mentirait pour l'un
+    # des deux. Le défaut (algo_base) reprend l'ancien texte mot pour mot.
+    info = algo.codec_note(meta, ds_key, n_images, int(seed or 0), stats)
     return figures[0], figures[1], info
 
 
@@ -575,21 +563,9 @@ def run_latent(algo_key, ds_key, name, n_viz, show_true):
     )
     if counts["Test"] < counts["Train"]:
         info += f"ℹ️ Test plafonne à {len(ds.X_test)} images : c'est toute sa taille.\n\n"
-    info += (
-        f"Rappel : le vrai espace latent de ce codec est **un entier discret** dans "
-        f"{{0, …, {int(meta['k']) - 1}}}. Ces nuages sont une *projection PCA des "
-        f"données* en 2D colorée par code — une vue de la structure trouvée, pas "
-        f"l'espace latent lui-même.\n\n"
-        "⚠️ Chaque split calcule **sa propre** PCA : les axes des deux figures ne sont "
-        "pas les mêmes repères. Compare les *formes* des groupes, pas les positions — "
-        "un nuage peut apparaître mirroité, le signe des composantes étant arbitraire.\n\n"
-        "**Distribution** : un groupe de barres par code, une barre par classe réelle. "
-        "Un groupe dominé par une seule barre = code pur ; plusieurs barres de hauteur "
-        "voisine = code qui mélange des classes. La pureté indiquée est la part des "
-        "images tombant dans un groupe où leur classe est majoritaire — c'est ce que "
-        "l'inertie ne mesure **pas**.\n\n"
-        + memory_note(n_viz, int(meta["k"]))
-    )
+    # Le paragraphe « qu'est-ce que cet espace latent » vient de l'algo : discret
+    # pour K-means/SOM (le défaut d'algo_base), continu pour la PCA.
+    info += algo.latent_note(meta) + "\n\n" + memory_note(n_viz, int(meta["k"]))
     return figures[0], figures[1], distributions[0], distributions[1], info
 
 
@@ -609,20 +585,24 @@ def run_dictionary(algo_key, ds_key, name, n_viz=2000):
 
 
 def run_extra(algo_key, ds_key, name, n_viz=2000):
-    """Les vues propres à l'algo — au plus 2, masquées s'il n'en a pas."""
+    """Les vues propres à l'algo — les emplacements vides restent masqués."""
     name = active_model(algo_key, ds_key, name)
     if not name:
-        return gr.update(visible=False), gr.update(visible=False), NO_MODEL
+        return (*[gr.update(visible=False)] * MAX_EXTRA_FIGURES, NO_MODEL)
 
     ds = get_dataset(ds_key)
     algo, weights, meta = load_active(algo_key, name)
 
     n = min(int(n_viz or 1), len(ds.X_train))
-    labels = algo.assign(ds.X_train[:n], weights)
-    figures = algo.extra_figures(weights, meta, labels, ds.y_train[:n], ds.class_names)
+    X, y = ds.X_train[:n], ds.y_train[:n]
+    labels = algo.assign(X, weights)
+    # La variante « avec données » : les vues de la PCA (génération,
+    # interpolation, centrage) ont besoin des images ; pour K-means et Kohonen
+    # elle délègue simplement à extra_figures.
+    figures = algo.extra_figures_with_data(X, weights, meta, labels, y, ds.class_names)
 
     slots = []
-    for i in range(2):
+    for i in range(MAX_EXTRA_FIGURES):
         if i < len(figures):
             title, fig = figures[i]
             slots.append(gr.update(value=released(fig), label=title, visible=True))
@@ -636,7 +616,7 @@ def run_extra(algo_key, ds_key, name, n_viz=2000):
             f"Vues propres à **{algo.label}**, calculées sur {n} images de train : "
             + " · ".join(f"**{t}**" for t, _ in figures)
         )
-    return slots[0], slots[1], note
+    return (*slots, note)
 
 
 def run_curve(algo_key, ds_key, name):
@@ -720,7 +700,9 @@ def export_all(algo_key, ds_key, name, n_viz, n_images, seed, progress=gr.Progre
 
     progress(0.85, desc=f"Vues propres à {algo.label}…")
     labels = algo.assign(ds.X_train[:n_viz], weights)
-    extras = algo.extra_figures(weights, meta, labels, ds.y_train[:n_viz], ds.class_names)
+    extras = algo.extra_figures_with_data(
+        ds.X_train[:n_viz], weights, meta, labels, ds.y_train[:n_viz], ds.class_names
+    )
     for i, (title, fig) in enumerate(extras):
         emit(f"{10 + i}_{title.split('—')[0].strip().lower().replace(' ', '_')}.png", fig)
 
@@ -917,8 +899,11 @@ with gr.Blocks(title="Codecs non supervisés") as demo:
                         "Ce que cet algo est seul à pouvoir montrer : l'U-matrix d'un SOM "
                         "n'a aucun sens pour un K-means, et réciproquement."
                     )
-                    extra_plot_1 = gr.Plot(visible=False)
-                    extra_plot_2 = gr.Plot(visible=False)
+                    # Autant d'emplacements que l'algo le plus bavard (la PCA en
+                    # remplit 9) : run_extra masque ceux qui restent vides.
+                    extra_plots = [
+                        gr.Plot(visible=False) for _ in range(MAX_EXTRA_FIGURES)
+                    ]
                     extra_md = gr.Markdown()
 
                 # ------------------------------------ Courbe d'entraînement
@@ -970,7 +955,7 @@ with gr.Blocks(title="Codecs non supervisés") as demo:
         codec_plot_train, codec_plot_test, codec_md,
         latent_plot_train, latent_plot_test, latent_dist_train, latent_dist_test, latent_md,
         dict_plot, dict_md,
-        extra_plot_1, extra_plot_2, extra_md,
+        *extra_plots, extra_md,
         curve_plot, curve_md,
     ]
 
@@ -1053,7 +1038,7 @@ with gr.Blocks(title="Codecs non supervisés") as demo:
     tab_dict.select(run_dictionary, [algo_dd, dataset_dd, model_dd], dict_outputs)
     model_dd.change(run_dictionary, [algo_dd, dataset_dd, model_dd], dict_outputs)
 
-    extra_outputs = [extra_plot_1, extra_plot_2, extra_md]
+    extra_outputs = [*extra_plots, extra_md]
     tab_extra.select(run_extra, [algo_dd, dataset_dd, model_dd], extra_outputs)
     model_dd.change(run_extra, [algo_dd, dataset_dd, model_dd], extra_outputs)
 
