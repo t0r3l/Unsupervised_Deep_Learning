@@ -47,6 +47,7 @@ import gradio as gr
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from algo_base import history_of  # noqa: E402
 from data_import import DATASETS, load_dataset  # noqa: E402
+from autoencoder.algo import Autoencoder  # noqa: E402
 from kmeas.algo import KMeans  # noqa: E402
 from kohonen.algo import Kohonen  # noqa: E402
 from pca.algo import PCAAlgo  # noqa: E402
@@ -55,7 +56,7 @@ from pca.algo import PCAAlgo  # noqa: E402
 # vit chez lui (src/kmeas/algo.py, src/kohonen/algo.py) et présente l'interface
 # Algo (algo_base.py) ; ajouter un algo se limite donc à cette ligne.
 # L'ordre fixe celui du sélecteur ; la première entrée est l'algo par défaut.
-ALGOS = {algo.key: algo for algo in (KMeans(), Kohonen(), PCAAlgo())}
+ALGOS = {algo.key: algo for algo in (KMeans(), Kohonen(), PCAAlgo(), Autoencoder())}
 DEFAULT_ALGO = next(iter(ALGOS))
 
 IMAGE_DIM = 784
