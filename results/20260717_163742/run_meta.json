@@ -1,0 +1,39 @@
+{
+  "datasets": [
+    [
+      "quickdraw",
+      "full"
+    ]
+  ],
+  "mode": "curated",
+  "n_train": 0,
+  "n_test": 0,
+  "data_seed": 42,
+  "algos": [
+    "vae",
+    "pca"
+  ],
+  "vae_baseline": {
+    "architecture": "dense",
+    "latent_dim": 10,
+    "kl_weight": 0.001,
+    "hidden_dims": "128-32",
+    "conv_filters": "32-64",
+    "hidden_activation": "relu",
+    "latent_activation": "linear",
+    "output_activation": "sigmoid",
+    "optimizer": "adam",
+    "learning_rate": 0.001,
+    "batch_size": 256,
+    "epochs": 12,
+    "seed": 42
+  },
+  "pca_baseline": {
+    "n_components": 50,
+    "center": "feature"
+  },
+  "saved_models": true,
+  "n_models_saved": 16,
+  "total_seconds": 156.9,
+  "timestamp": "20260717_163742"
+}
