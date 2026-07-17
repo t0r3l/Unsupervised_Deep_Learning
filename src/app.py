@@ -51,12 +51,13 @@ from autoencoder.algo import Autoencoder  # noqa: E402
 from kmeas.algo import KMeans  # noqa: E402
 from kohonen.algo import Kohonen  # noqa: E402
 from pca.algo import PCAAlgo  # noqa: E402
+from vae.algo import VAE  # noqa: E402
 
 # Le catalogue des algos — la SEULE chose que ce fichier sait d'eux. Chaque algo
 # vit chez lui (src/kmeas/algo.py, src/kohonen/algo.py) et présente l'interface
 # Algo (algo_base.py) ; ajouter un algo se limite donc à cette ligne.
 # L'ordre fixe celui du sélecteur ; la première entrée est l'algo par défaut.
-ALGOS = {algo.key: algo for algo in (KMeans(), Kohonen(), PCAAlgo(), Autoencoder())}
+ALGOS = {algo.key: algo for algo in (KMeans(), Kohonen(), PCAAlgo(), Autoencoder(), VAE())}
 DEFAULT_ALGO = next(iter(ALGOS))
 
 IMAGE_DIM = 784
