@@ -3,7 +3,7 @@
 Comme pour le K-means, aucun calcul ici : uniquement la traduction vers
 l'interface commune (algo_base, à la racine de src/).
 
-La grille (rows, cols, topology) est le point délicat : elle n'a pas d'équivalent
+La grille (rows, cols) est le point délicat : elle n'a pas d'équivalent
 K-means. Elle voyage donc dans les MÉTADONNÉES du modèle, et toutes les vues la
 relisent de là — jamais d'un réglage courant de l'UI, qui pourrait ne pas
 correspondre au modèle chargé.
@@ -45,12 +45,6 @@ class Kohonen(Algo):
               info="k = lignes × colonnes"),
         Param("cols", "Colonnes de la grille", "int", 10, minimum=1,
               info="k = lignes × colonnes"),
-        Param(
-            "topology", "Topologie", "choice", "hex",
-            choices=[("Hexagonale — 6 voisins équidistants", "hex"),
-                     ("Rectangulaire — 4 voisins + 4 diagonales", "rect")],
-            info="Qui est voisin de qui, donc qui reçoit la correction.",
-        ),
         Param("alpha", "Alpha — pas d'apprentissage", "float", 0.1,
               minimum=0.0, maximum=1.0, step=0.01,
               info="Part du chemin vers l'exemple parcourue à chaque présentation. "
@@ -107,17 +101,15 @@ class Kohonen(Algo):
             seed=int(p["seed"]),
             verbose=False,
             return_history=True,
-            topology=str(p["topology"]),
         )
         weights = np.asarray(weights, dtype=np.float32)
 
         return weights, {
-            # k pour l'app (taille du dictionnaire) ; rows/cols/topology pour les
-            # vues, qui ne sauraient rien afficher sans la forme de la grille.
+            # k pour l'app (taille du dictionnaire) ; rows/cols pour les vues,
+            # qui ne sauraient rien afficher sans la forme de la grille.
             "k": rows * cols,
             "rows": rows,
             "cols": cols,
-            "topology": str(p["topology"]),
             "alpha": float(p["alpha"]),
             "gamma": float(p["gamma"]),
             "n_epochs": int(p["n_epochs"]),
@@ -154,8 +146,8 @@ class Kohonen(Algo):
     # ------------------------------------------------------------------- Vues
 
     def _grid(self, meta):
-        """(rows, cols, topology) du modèle — lus des métadonnées, jamais de l'UI."""
-        return int(meta["rows"]), int(meta["cols"]), meta.get("topology", "hex")
+        """(rows, cols) du modèle — lus des métadonnées, jamais de l'UI."""
+        return int(meta["rows"]), int(meta["cols"])
 
     def plot_reconstructions(self, originals, reconstructions, top_labels,
                              bottom_labels, title):
@@ -173,15 +165,15 @@ class Kohonen(Algo):
     # il n'y a rien à projeter (défaut None d'algo_base, l'app masque les nuages).
 
     def plot_dictionary(self, weights, meta, labels, y_true, class_names):
-        rows, cols, topology = self._grid(meta)
+        rows, cols = self._grid(meta)
         fig = plot_prototype_map(
             weights, rows, cols, cluster_labels=labels, y_true=y_true,
-            class_names=class_names, topology=topology,
+            class_names=class_names,
             title="Carte de Kohonen — feature vectors", show=False,
         )
         note = (
             f"**Les {rows * cols} feature vectors**, chacun à sa place sur la grille "
-            f"({topology}). C'est la vue signature du SOM : les cases **voisines se "
+            f"hexagonale. C'est la vue signature du SOM : les cases **voisines se "
             f"ressemblent**, ce qu'impose la règle de voisinage. La même vue pour un "
             f"K-means n'est qu'une grille d'affichage arbitraire — ses centroïdes "
             f"n'ont pas de voisins.\n\n"
@@ -219,7 +211,7 @@ class Kohonen(Algo):
         # Les histogrammes de composition par neurone — la même lecture de
         # l'espace latent (discret) que pour le K-means : un groupe de barres
         # par code, une barre par classe réelle.
-        rows, cols, _ = self._grid(meta)
+        rows, cols = self._grid(meta)
         return [(
             "Distribution des classes réelles par neurone",
             plot_class_distribution(
@@ -229,10 +221,9 @@ class Kohonen(Algo):
         )]
 
     def describe_rows(self, meta):
-        rows, cols, topology = self._grid(meta)
+        rows, cols = self._grid(meta)
         return [
             ("Grille", f"{rows} × {cols} = {rows * cols} neurones"),
-            ("Topologie", topology),
             ("Images d'entraînement", f"{meta['n_samples']}"),
             ("Inertie finale", f"{meta['inertia']:.1f}"),
             ("Époques", f"{meta['n_epochs']}"),

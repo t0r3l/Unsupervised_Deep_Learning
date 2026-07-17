@@ -57,6 +57,11 @@ def _build_dense(cfg):
         x = tf.keras.layers.Dense(units, name=f"encoder_dense_{i + 1}")(x)
         x = _apply_activation(x, act, f"encoder_activation_{i + 1}")
     z_mean = tf.keras.layers.Dense(latent_dim, name="z_mean")(x)
+    # L'activation latente ne porte que sur z_mean (le code déterministe) :
+    # z_log_var est une log-variance, elle doit rester libre sur tout ℝ, sinon
+    # la KL divergence n'a plus de sens.
+    z_mean = _apply_activation(z_mean, cfg.get("latent_activation", "linear"),
+                               "z_mean_activation")
     z_log_var = tf.keras.layers.Dense(latent_dim, name="z_log_var")(x)
     encoder = tf.keras.Model(encoder_input, [z_mean, z_log_var],
                              name="vae_dense_encoder")
@@ -94,6 +99,9 @@ def _build_conv(cfg):
     shape_before_flatten = tuple(int(d) for d in x.shape[1:])
     x = tf.keras.layers.Flatten(name="encoder_flatten")(x)
     z_mean = tf.keras.layers.Dense(latent_dim, name="z_mean")(x)
+    # Activation latente sur z_mean seul — z_log_var reste libre sur ℝ (voir dense).
+    z_mean = _apply_activation(z_mean, cfg.get("latent_activation", "linear"),
+                               "z_mean_activation")
     z_log_var = tf.keras.layers.Dense(latent_dim, name="z_log_var")(x)
     encoder = tf.keras.Model(encoder_input, [z_mean, z_log_var],
                              name="vae_conv_encoder")

@@ -103,6 +103,16 @@ class VAE(Algo):
                  "d'une PCA.",
         ),
         Param(
+            "latent_activation", "Activation latente (z_mean)", "choice", "linear",
+            choices=[("Linéaire — aucune (défaut)", "linear"),
+                     ("tanh — μ borné [-1, 1]", "tanh"),
+                     ("Sigmoïde — μ borné [0, 1]", "sigmoid"),
+                     ("ReLU", "relu"),
+                     ("Leaky ReLU (pente 0,2)", "leaky_relu")],
+            info="L'activation SUR z_mean (le code). z_log_var reste toujours "
+                 "linéaire : une log-variance doit rester libre sur ℝ pour la KL.",
+        ),
+        Param(
             "output_activation", "Activation de sortie", "choice", "sigmoid",
             choices=[("Sigmoïde — pixels dans [0, 1]", "sigmoid"),
                      ("Linéaire", "linear")],
@@ -149,6 +159,7 @@ class VAE(Algo):
             "conv_strides": tuple(2 for _ in filters),
             "kernel_size": 3,
             "hidden_activation": str(p.get("hidden_activation", "relu")),
+            "latent_activation": str(p.get("latent_activation", "linear")),
             "output_activation": str(p.get("output_activation", "sigmoid")),
             "optimizer": str(p.get("optimizer", "adam")),
             "learning_rate": float(p.get("learning_rate", 1e-3)),
@@ -472,7 +483,8 @@ class VAE(Algo):
             ("Dimension latente", f"{meta['k']}"),
             ("Poids KL", f"{float(meta.get('kl_weight', 1e-3)):g}"),
             (stack_label, stack or "—"),
-            ("Activations", f"{meta.get('hidden_activation', 'relu')} / "
+            ("Activations", f"{meta.get('hidden_activation', 'relu')} (cachée) / "
+                            f"{meta.get('latent_activation', 'linear')} (z_mean) / "
                             f"{meta.get('output_activation', 'sigmoid')} (sortie)"),
             ("Optimiseur", f"{meta.get('optimizer', 'adam')} "
                            f"(lr {meta.get('learning_rate', 1e-3):g})"),

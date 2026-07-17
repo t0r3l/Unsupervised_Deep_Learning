@@ -65,7 +65,9 @@ def _build_dense(cfg):
     for i, units in enumerate(hidden_dims):
         x = tf.keras.layers.Dense(units, name=f"encoder_dense_{i + 1}")(x)
         x = _apply_activation(x, act, f"encoder_activation_{i + 1}")
-    latent = tf.keras.layers.Dense(latent_dim, name="latent_linear")(x)
+    latent = tf.keras.layers.Dense(latent_dim, name="latent_dense")(x)
+    latent = _apply_activation(latent, cfg.get("latent_activation", "linear"),
+                               "latent_activation")
     encoder = tf.keras.Model(encoder_input, latent, name="dense_encoder")
 
     decoder_input = tf.keras.Input(shape=(latent_dim,), name="latent_vector")
@@ -100,7 +102,9 @@ def _build_conv(cfg):
         x = _apply_activation(x, act, f"encoder_conv_activation_{i + 1}")
     shape_before_flatten = tuple(int(d) for d in x.shape[1:])
     x = tf.keras.layers.Flatten(name="encoder_flatten")(x)
-    latent = tf.keras.layers.Dense(latent_dim, name="latent_linear")(x)
+    latent = tf.keras.layers.Dense(latent_dim, name="latent_dense")(x)
+    latent = _apply_activation(latent, cfg.get("latent_activation", "linear"),
+                               "latent_activation")
     encoder = tf.keras.Model(encoder_input, latent, name="conv_encoder")
 
     decoder_input = tf.keras.Input(shape=(latent_dim,), name="latent_vector")

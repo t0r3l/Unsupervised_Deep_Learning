@@ -40,35 +40,25 @@ une version atténuée, les neurones lointains rien du tout.
 import numpy as np
 
 
-def grid_coords(rows, cols, topology="hex"):
+def grid_coords(rows, cols):
     """Positions (k, 2) des neurones — leur espace topologique. Colonnes : (x, y).
 
     Le neurone i occupe la case (i // cols, i % cols). Ce sont ces coordonnées
     qui entrent dans ||Ci - Ck||², jamais les feature vectors.
 
-    topology="rect" : cases alignées, x = colonne, y = ligne. Un neurone a alors
-        4 voisins à distance 1... et 4 diagonales à distance 1,41. Ses 8 voisins
-        ne sont donc PAS équivalents : les diagonaux reçoivent 2x moins de
-        correction, et la carte s'étire légèrement selon les axes.
+    Grille hexagonale : lignes impaires décalées d'une demi-case, lignes espacées
+    de √3/2. Les 6 voisins tombent alors tous à distance exactement 1 — c'est
+    vérifiable : le voisin de la ligne du dessus est à (±0,5 ; √3/2), soit
+    √(0,25 + 0,75) = 1. C'est la grille classique de Kohonen, la seule pour
+    laquelle « voisin » a un sens unique.
 
-    topology="hex" : lignes impaires décalées d'une demi-case, lignes espacées
-        de √3/2. Les 6 voisins tombent alors tous à distance exactement 1 —
-        c'est vérifiable : le voisin de la ligne du dessus est à (±0,5 ; √3/2),
-        soit √(0,25 + 0,75) = 1. C'est la grille classique de Kohonen, et la
-        seule pour laquelle « voisin » a un sens unique.
-
-    Le reste du code ne change pas d'une ligne : neighborhood_matrix ne lit que
-    des distances euclidiennes entre ces coordonnées.
+    Le reste du code ne lit que des distances euclidiennes entre ces coordonnées.
     """
     r, c = np.meshgrid(np.arange(rows), np.arange(cols), indexing="ij")
     r = r.ravel().astype(np.float32)
     c = c.ravel().astype(np.float32)
 
-    if topology == "rect":
-        return np.stack([c, r], axis=1)
-    if topology == "hex":
-        return np.stack([c + 0.5 * (r % 2), r * (np.sqrt(3) / 2)], axis=1).astype(np.float32)
-    raise ValueError(f"topology inconnue : {topology!r}. Attendu : 'hex' ou 'rect'.")
+    return np.stack([c + 0.5 * (r % 2), r * (np.sqrt(3) / 2)], axis=1).astype(np.float32)
 
 
 def neighborhood_matrix(coords, gamma):
@@ -154,16 +144,12 @@ def compute_inertia(X, weights, labels=None):
 
 
 def fit_kohonen(X, rows, cols, n_epochs, alpha, gamma, seed, verbose,
-                return_history=False, topology="hex"):
+                return_history=False):
     """Entraîne une carte de Kohonen. Retourne (weights, labels).
 
     Args:
         X:        (n, d) données d'entraînement.
         rows,cols: forme de la grille ; k = rows · cols neurones.
-        topology: "hex" (défaut, 6 voisins équidistants) ou "rect".
-                  À passer aussi aux visualisations : afficher des hexagones
-                  alors que l'entraînement a utilisé une grille carrée
-                  mentirait sur les voisinages.
         n_epochs: passes sur les données. Une époque = n tirages, soit chaque
                   exemple présenté une fois (dans un ordre remélangé à chaque
                   fois). L'algo tire un exemple au hasard ; parcourir une
@@ -195,7 +181,7 @@ def fit_kohonen(X, rows, cols, n_epochs, alpha, gamma, seed, verbose,
             f"l'initialisation tire k exemples distincts, il en faut au moins k."
         )
 
-    coords = grid_coords(rows, cols, topology)
+    coords = grid_coords(rows, cols)
     H = neighborhood_matrix(coords, gamma)      # (k, k), calculé une seule fois
     weights = initialize_weights(X, k, seed)
 

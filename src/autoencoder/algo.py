@@ -99,6 +99,16 @@ class Autoencoder(Algo):
                  "d'une PCA.",
         ),
         Param(
+            "latent_activation", "Activation latente", "choice", "linear",
+            choices=[("Linéaire — aucune (défaut)", "linear"),
+                     ("tanh — code borné [-1, 1]", "tanh"),
+                     ("Sigmoïde — code borné [0, 1]", "sigmoid"),
+                     ("ReLU", "relu"),
+                     ("Leaky ReLU (pente 0,2)", "leaky_relu")],
+            info="L'activation SUR la couche latente (le goulot). Linéaire = le "
+                 "code non contraint, comme une PCA ; tanh/sigmoïde le bornent.",
+        ),
+        Param(
             "output_activation", "Activation de sortie", "choice", "sigmoid",
             choices=[("Sigmoïde — pixels dans [0, 1]", "sigmoid"),
                      ("Linéaire", "linear")],
@@ -144,6 +154,7 @@ class Autoencoder(Algo):
             "conv_strides": tuple(2 for _ in filters),
             "kernel_size": 3,
             "hidden_activation": str(p.get("hidden_activation", "relu")),
+            "latent_activation": str(p.get("latent_activation", "linear")),
             "output_activation": str(p.get("output_activation", "sigmoid")),
             "optimizer": str(p.get("optimizer", "adam")),
             "learning_rate": float(p.get("learning_rate", 1e-3)),
@@ -446,7 +457,8 @@ class Autoencoder(Algo):
             ("Architecture", "convolutionnelle" if arch == "conv" else "dense"),
             ("Dimension latente", f"{meta['k']}"),
             (stack_label, stack or "—"),
-            ("Activations", f"{meta.get('hidden_activation', 'relu')} / "
+            ("Activations", f"{meta.get('hidden_activation', 'relu')} (cachée) / "
+                            f"{meta.get('latent_activation', 'linear')} (latente) / "
                             f"{meta.get('output_activation', 'sigmoid')} (sortie)"),
             ("Optimiseur", f"{meta.get('optimizer', 'adam')} "
                            f"(lr {meta.get('learning_rate', 1e-3):g})"),

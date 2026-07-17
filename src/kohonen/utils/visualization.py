@@ -116,19 +116,19 @@ def show_reconstructions(originals, reconstructions, top_labels=None,
     return fig
 
 
-def neighbor_distance(weights, rows, cols, topology="hex"):
+def neighbor_distance(weights, rows, cols):
     """(k,) distance moyenne de chaque neurone à ses voisins immédiats — l'U-matrix.
 
     « Voisin immédiat » = à distance 1 dans l'espace TOPOLOGIQUE : les 6 voisins
-    d'un hexagone, les 4 d'une case carrée. Aucun décalage n'est codé à la main —
-    on relit les coordonnées qui ont servi à l'entraînement.
+    d'un hexagone. Aucun décalage n'est codé à la main — on relit les coordonnées
+    qui ont servi à l'entraînement.
 
     Grande valeur = le neurone ne ressemble pas à ses voisins = on est sur une
     frontière entre deux groupes. C'est l'information que ni la carte des
     prototypes ni celle des classes ne donnent : la grille est régulière, les
     distances réelles entre voisins ne le sont pas.
     """
-    coords = grid_coords(rows, cols, topology)
+    coords = grid_coords(rows, cols)
     W = np.asarray(weights, dtype=np.float32)
 
     d_grid = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=2)
@@ -142,7 +142,7 @@ def neighbor_distance(weights, rows, cols, topology="hex"):
 
 
 def plot_heatmap(weights, rows, cols, cluster_labels=None, y_true=None,
-                 class_names=None, color_by="umatrix", topology="hex",
+                 class_names=None, color_by="umatrix",
                  annotate=True, cmap=None, title=None, figsize=None, show=True):
     """Heatmap de la carte de Kohonen : une case = un neurone, à sa place.
 
@@ -157,8 +157,6 @@ def plot_heatmap(weights, rows, cols, cluster_labels=None, y_true=None,
                             cluster_labels). Les cases à 0 sont les neurones morts.
                         "class"   : classe réelle majoritaire (demande
                             cluster_labels + y_true).
-        topology:       celle de l'entraînement — sert à savoir QUI est voisin de
-                        qui pour l'U-matrix.
         annotate:       écrit la valeur dans chaque case.
         cmap:           colormap ; un défaut adapté à color_by si None.
 
@@ -170,11 +168,11 @@ def plot_heatmap(weights, rows, cols, cluster_labels=None, y_true=None,
                         couleur y vaut partout le même écart de valeur.
         show:           True -> plt.show() (notebook) ; False -> retourne la figure.
 
-    Note : la heatmap est une grille rectangulaire. En topologie "hex" les
-    voisinages sont bien calculés en hexagonal (6 voisins), mais l'AFFICHAGE ne
-    décale pas les lignes impaires d'une demi-case — deux cases mitoyennes à
-    l'écran sur deux lignes différentes ne sont donc pas forcément voisines. La
-    carte des feature vectors, elle, respecte le décalage.
+    Note : la heatmap est une grille rectangulaire. Les voisinages sont bien
+    calculés en hexagonal (6 voisins), mais l'AFFICHAGE ne décale pas les lignes
+    impaires d'une demi-case — deux cases mitoyennes à l'écran sur deux lignes
+    différentes ne sont donc pas forcément voisines. La carte des feature
+    vectors, elle, respecte le décalage.
     """
     rows, cols = int(rows), int(cols)
     k = rows * cols
@@ -191,7 +189,7 @@ def plot_heatmap(weights, rows, cols, cluster_labels=None, y_true=None,
     tick_labels = None
 
     if color_by == "umatrix":
-        values = neighbor_distance(weights, rows, cols, topology)
+        values = neighbor_distance(weights, rows, cols)
         # inferno : du noir au jaune en passant par le pourpre et l'orange. La
         # luminosité y croît avec la valeur, donc « clair = frontière » reste
         # vrai — la couleur ne fait qu'écarter davantage les paliers voisins.
@@ -285,7 +283,7 @@ def plot_heatmap(weights, rows, cols, cluster_labels=None, y_true=None,
         cbar.set_ticks(list(ticks))
         cbar.ax.set_yticklabels(tick_labels)
 
-    subtitle = f"grille {rows}x{cols} = {k} neurones ({topology})"
+    subtitle = f"grille {rows}x{cols} = {k} neurones (hexagonale)"
     if cluster_labels is not None:
         dead = int((np.bincount(cluster_labels, minlength=k) == 0).sum())
         subtitle += f" — {dead} neurone(s) mort(s)"
@@ -298,7 +296,7 @@ def plot_heatmap(weights, rows, cols, cluster_labels=None, y_true=None,
 
 
 def plot_prototype_map(weights, rows, cols, cluster_labels=None, y_true=None,
-                       class_names=None, topology="hex", cell_size=0.62,
+                       class_names=None, cell_size=0.62,
                        title="Carte de Kohonen — feature vectors", show=True):
     """Affiche les k feature vectors à leur place sur la grille.
 
@@ -308,14 +306,13 @@ def plot_prototype_map(weights, rows, cols, cluster_labels=None, y_true=None,
     d'affichage arbitraire : ses centroïdes n'ont pas de voisins, on les y range
     par taille de cluster faute de mieux.
 
-    L'affichage est une grille RECTANGULAIRE bien alignée, même en topologie
-    "hex" : les voisinages hexagonaux valent pour l'entraînement, pas pour la
-    lecture — comme les heatmaps, on ne décale pas les lignes impaires.
+    L'affichage est une grille RECTANGULAIRE bien alignée : les voisinages
+    hexagonaux valent pour l'entraînement, pas pour la lecture — comme les
+    heatmaps, on ne décale pas les lignes impaires.
 
     Args:
         weights:        (k, 784) feature vectors, k = rows · cols.
         rows, cols:     forme de la grille.
-        topology:       celle de l'entraînement — uniquement pour le sous-titre.
         cluster_labels: (n,) neurone gagnant de chaque image ; grise les neurones
                         morts (jamais gagnants) et permet d'annoter les classes.
         y_true:         (n,) labels réels ; annote chaque case de sa classe
@@ -391,7 +388,7 @@ def plot_prototype_map(weights, rows, cols, cluster_labels=None, y_true=None,
     ax.invert_yaxis()
     ax.axis("off")
 
-    subtitle = f"grille {rows}x{cols} = {k} neurones ({topology})"
+    subtitle = f"grille {rows}x{cols} = {k} neurones (hexagonale)"
     if sizes is not None:
         subtitle += f" — {int((sizes == 0).sum())} neurone(s) mort(s)"
     ax.set_title(f"{title}\n{subtitle}", fontsize=11)
