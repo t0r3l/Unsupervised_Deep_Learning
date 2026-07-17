@@ -545,12 +545,16 @@ def run_latent(algo_key, ds_key, name, n_viz, show_true):
         counts[split] = n
         X_viz, y_viz = X_all[:n], y_all[:n]
 
-        figures.append(released(algo.plot_latent(
+        # None pour les codecs à code discret (K-means, SOM) : leur latent est
+        # un entier, il n'y a rien à projeter — le nuage reste vide, seules les
+        # distributions parlent. PCA et autoencodeur, eux, rendent une figure.
+        fig = algo.plot_latent(
             X_viz, weights, meta,
             y_viz if show_true else None,
             ds.class_names, y_label,
             f"{split.upper()} — {n} images",
-        )))
+        )
+        figures.append(released(fig) if fig is not None else None)
         distributions.append(released(algo.plot_distribution(
             algo.assign(X_viz, weights), y_viz,
             ds.class_names, int(meta["k"]),
@@ -690,8 +694,16 @@ def export_all(algo_key, ds_key, name, n_viz, n_images, seed, progress=gr.Progre
     lat_train, lat_test, dist_train, dist_test, _ = run_latent(
         algo_key, ds_key, name, n_viz, True
     )
-    emit("05_latent_train.png", lat_train)
-    emit("06_latent_test.png", lat_test)
+    # Pas de projection pour les codecs à code discret : plot_latent rend None.
+    if lat_train is not None:
+        emit("05_latent_train.png", lat_train)
+    if lat_test is not None:
+        emit("06_latent_test.png", lat_test)
+    if lat_train is None and lat_test is None:
+        skipped.append(
+            "**les nuages de l'espace latent** — le code de cet algo est un entier "
+            "discret, il n'y a rien à projeter (voir les distributions)"
+        )
     emit("07_distribution_train.png", dist_train)
     emit("08_distribution_test.png", dist_test)
 
@@ -864,8 +876,11 @@ with gr.Blocks(title="Codecs non supervisés") as demo:
                 with gr.Tab("Espace latent") as tab_latent:
                     gr.Markdown("## Espace latent")
                     gr.Markdown(
-                        "Les **deux splits projetés en une fois**. Test étant plus petit, "
-                        "il plafonne à sa taille."
+                        "Les **deux splits traités en une fois**. Test étant plus petit, "
+                        "il plafonne à sa taille. Les algos à latent **continu** (PCA, "
+                        "autoencodeur) affichent leur projection 2D ; les codecs à code "
+                        "**discret** (K-means, SOM) n'ont rien à projeter — leurs "
+                        "distributions suffisent."
                     )
 
                     with gr.Row():

@@ -201,7 +201,14 @@ class Algo:
         raise NotImplementedError
 
     def plot_latent(self, X, weights, meta, y_true, class_names, y_label, title):
-        raise NotImplementedError
+        """Projection 2D de l'espace latent, ou None s'il n'y en a pas.
+
+        Le défaut est None : le latent d'un codec discret (K-means, SOM) est un
+        entier, il n'y a rien à projeter — l'app laisse alors les nuages vides
+        et ne montre que les distributions. Seuls les algos à latent continu
+        (PCA, autoencodeur) fournissent une figure.
+        """
+        return None
 
     def plot_dictionary(self, weights, meta, labels, y_true, class_names):
         """Le dictionnaire appris, en une figure. Retourne (figure, note markdown)."""
@@ -272,13 +279,9 @@ class Algo:
     def latent_note(self, meta):
         """Paragraphe « qu'est-ce que cet espace latent » de l'onglet Espace latent."""
         return (
-            f"Rappel : le vrai espace latent de ce codec est **un entier discret** dans "
-            f"{{0, …, {int(meta['k']) - 1}}}. Ces nuages sont une *projection PCA des "
-            f"données* en 2D colorée par code — une vue de la structure trouvée, pas "
-            f"l'espace latent lui-même.\n\n"
-            "⚠️ Chaque split calcule **sa propre** PCA : les axes des deux figures ne sont "
-            "pas les mêmes repères. Compare les *formes* des groupes, pas les positions — "
-            "un nuage peut apparaître mirroité, le signe des composantes étant arbitraire.\n\n"
+            f"L'espace latent de ce codec est **un entier discret** dans "
+            f"{{0, …, {int(meta['k']) - 1}}} : il n'y a rien à projeter en 2D, ce sont "
+            f"donc les **distributions** qui le décrivent.\n\n"
             "**Distribution** : un groupe de barres par code, une barre par classe réelle. "
             "Un groupe dominé par une seule barre = code pur ; plusieurs barres de hauteur "
             "voisine = code qui mélange des classes. La pureté indiquée est la part des "

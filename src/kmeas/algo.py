@@ -27,7 +27,6 @@ from .utils.visualization import (
     plot_centroid_map,
     plot_class_distribution,
     plot_inertia,
-    plot_latent_space,
     show_images,
     show_reconstructions,
 )
@@ -147,12 +146,8 @@ class KMeans(Algo):
             codes, y_true, class_names=class_names, k=k, title=title, show=False,
         )
 
-    def plot_latent(self, X, weights, meta, y_true, class_names, y_label, title):
-        labels = self.assign(X, weights)
-        return plot_latent_space(
-            X, labels, centroids=weights, y_true=y_true,
-            title=title, y_label=y_label, show=False,
-        )
+    # plot_latent : pas d'override — le latent du K-means est un entier discret,
+    # il n'y a rien à projeter (défaut None d'algo_base, l'app masque les nuages).
 
     def plot_dictionary(self, weights, meta, labels, y_true, class_names):
         k = int(meta["k"])

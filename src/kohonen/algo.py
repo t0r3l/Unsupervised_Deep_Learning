@@ -17,9 +17,7 @@ from .utils.metrics import mse_from_inertia
 from .utils.registry import delete_model, list_models, load_model, save_model
 from .utils.visualization import (
     plot_class_distribution,
-    plot_heatmap,
     plot_inertia,
-    plot_latent_space,
     plot_prototype_map,
     show_reconstructions,
 )
@@ -171,12 +169,8 @@ class Kohonen(Algo):
             codes, y_true, class_names=class_names, k=k, title=title, show=False,
         )
 
-    def plot_latent(self, X, weights, meta, y_true, class_names, y_label, title):
-        rows, cols, topology = self._grid(meta)
-        return plot_latent_space(
-            X, weights, rows, cols, y_true=y_true, class_names=class_names,
-            topology=topology, title=title, y_label=y_label, show=False,
-        )
+    # plot_latent : pas d'override — le latent du SOM est un entier discret,
+    # il n'y a rien à projeter (défaut None d'algo_base, l'app masque les nuages).
 
     def plot_dictionary(self, weights, meta, labels, y_true, class_names):
         rows, cols, topology = self._grid(meta)
@@ -195,11 +189,6 @@ class Kohonen(Algo):
             f"poids n'a été appris que passivement, par voisinage. Le chiffre en cyan "
             f"est la classe majoritaire du neurone."
         )
-        if topology == "hex":
-            note += (
-                "\n\n*Les lignes impaires sont décalées d'une demi-case : c'est ce qui "
-                "met les 6 voisins à distance égale.*"
-            )
         return fig, note
 
     def plot_curve(self, history, n_samples):
@@ -227,17 +216,17 @@ class Kohonen(Algo):
         return fig, note
 
     def extra_figures(self, weights, meta, labels, y_true, class_names):
-        rows, cols, topology = self._grid(meta)
-        return [
-            ("U-matrix — frontières entre groupes", plot_heatmap(
-                weights, rows, cols, cluster_labels=labels, color_by="umatrix",
-                topology=topology, show=False,
-            )),
-            ("Densité — images gagnées par neurone", plot_heatmap(
-                weights, rows, cols, cluster_labels=labels, color_by="density",
-                topology=topology, show=False,
-            )),
-        ]
+        # Les histogrammes de composition par neurone — la même lecture de
+        # l'espace latent (discret) que pour le K-means : un groupe de barres
+        # par code, une barre par classe réelle.
+        rows, cols, _ = self._grid(meta)
+        return [(
+            "Distribution des classes réelles par neurone",
+            plot_class_distribution(
+                labels, y_true, class_names=class_names, k=rows * cols,
+                title="Distribution des classes réelles par neurone", show=False,
+            ),
+        )]
 
     def describe_rows(self, meta):
         rows, cols, topology = self._grid(meta)

@@ -1,28 +1,15 @@
 """Visualisations de la carte de Kohonen.
 
---- L'espace latent est projeté en PCA, comme celui du K-means ---
-
-La grille du SOM est déjà une carte 2D, apprise pendant l'entraînement : on
-pourrait y poser les images directement, sans rien projeter. Mais ses
-coordonnées sont DISCRÈTES — k positions pour n images — et le nuage obtenu est
-fait de k paquets, pas d'une nappe. Illisible dès que k est petit devant n.
-
-plot_latent_space projette donc les images en PCA, comme la version K-means, et
-y superpose les neurones du SOM. On y perd ce que perd toute PCA (~83 % de la
-variance de MNIST sur 2 composantes), mais la figure devient continue et
-directement comparable à celle du K-means.
-
-Ce que cette figure a en plus de celle du K-means : le MAILLAGE. On relie les
-neurones voisins sur la grille, ce qui donne à voir la carte elle-même — comment
-la grille se replie à travers le nuage. Les centroïdes d'un K-means n'ont pas de
-voisins : il n'y a rien à relier, on ne peut qu'en poser les croix.
+L'espace latent du SOM est un entier discret (le neurone gagnant) : il ne se
+projette pas, il se DÉCRIT. La carte des prototypes montre le dictionnaire à sa
+place sur la grille, et les distributions par neurone montrent quelles classes
+réelles chaque code regroupe.
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
 
-from .kohonen import compute_squared_distances, grid_coords
+from .kohonen import grid_coords
 
 
 def show_prototype(weight, title="Feature vector du neurone", show=True):
@@ -321,13 +308,14 @@ def plot_prototype_map(weights, rows, cols, cluster_labels=None, y_true=None,
     d'affichage arbitraire : ses centroïdes n'ont pas de voisins, on les y range
     par taille de cluster faute de mieux.
 
-    En topologie "hex", les lignes impaires sont décalées d'une demi-case, comme
-    pendant l'entraînement : deux images côte à côte sont bien à distance 1.
+    L'affichage est une grille RECTANGULAIRE bien alignée, même en topologie
+    "hex" : les voisinages hexagonaux valent pour l'entraînement, pas pour la
+    lecture — comme les heatmaps, on ne décale pas les lignes impaires.
 
     Args:
         weights:        (k, 784) feature vectors, k = rows · cols.
         rows, cols:     forme de la grille.
-        topology:       celle de l'entraînement — "hex" ou "rect".
+        topology:       celle de l'entraînement — uniquement pour le sous-titre.
         cluster_labels: (n,) neurone gagnant de chaque image ; grise les neurones
                         morts (jamais gagnants) et permet d'annoter les classes.
         y_true:         (n,) labels réels ; annote chaque case de sa classe
@@ -342,8 +330,6 @@ def plot_prototype_map(weights, rows, cols, cluster_labels=None, y_true=None,
         raise ValueError(
             f"{k} feature vectors pour une grille {rows}x{cols} = {rows * cols} cases."
         )
-
-    coords = grid_coords(rows, cols, topology)
 
     sizes = None
     if cluster_labels is not None:
@@ -370,20 +356,17 @@ def plot_prototype_map(weights, rows, cols, cluster_labels=None, y_true=None,
                 dominant[c] = np.bincount(members, minlength=n_classes).argmax()
 
     # Une seule paire d'axes, et chaque prototype posé à ses coordonnées via
-    # `extent`. Une grille de subplots ne saurait pas décaler les lignes
-    # impaires d'une demi-case.
-    y_span = float(coords[:, 1].max())
+    # `extent` : case (ligne, colonne) = position (colonne, ligne), grille
+    # rectangulaire bien alignée.
     fig, ax = plt.subplots(figsize=(cols * cell_size + 2.2,
-                                    y_span * cell_size + 1.4))
+                                    (rows - 1) * cell_size + 1.4))
 
-    # Vignettes CARRÉES : une image 28x28 étirée pour remplir une case hexagonale
-    # (plus large que haute) déformerait les chiffres. On garde donc half_w =
-    # half_h, quitte à laisser un peu d'air. 0.40 < 0.866/2 : les lignes
-    # voisines, plus resserrées que les colonnes, ne se chevauchent pas.
-    half = 0.40
+    # Vignettes CARRÉES, demi-côté < 0.5 : un fin liseré sépare les cases
+    # voisines sans les faire se chevaucher.
+    half = 0.46
 
     for i in range(k):
-        x, y = coords[i]
+        x, y = float(i % cols), float(i // cols)
         dead = sizes is not None and sizes[i] == 0
         # extent = (gauche, droite, bas, haut) : « bas » vaut y + half car
         # l'axe est inversé plus bas, donc les grands y s'affichent en bas.
@@ -401,8 +384,8 @@ def plot_prototype_map(weights, rows, cols, cluster_labels=None, y_true=None,
                     ha="left", va="bottom", fontsize=cell_size * 9,
                     color="cyan", zorder=3)
 
-    ax.set_xlim(-0.7, cols + 0.1)
-    ax.set_ylim(-0.7, y_span + 0.8)
+    ax.set_xlim(-0.6, cols - 0.4)
+    ax.set_ylim(-0.6, rows - 0.4)
     ax.set_aspect("equal")
     # Ligne 0 en haut, comme toutes les autres vues de la grille.
     ax.invert_yaxis()
@@ -412,175 +395,6 @@ def plot_prototype_map(weights, rows, cols, cluster_labels=None, y_true=None,
     if sizes is not None:
         subtitle += f" — {int((sizes == 0).sum())} neurone(s) mort(s)"
     ax.set_title(f"{title}\n{subtitle}", fontsize=11)
-
-    fig.tight_layout()
-    if show:
-        plt.show()
-    return fig
-
-
-def _pca_2d(X, mean=None, components=None, n_iter=4, seed=0):
-    """Projette X (n, d) en 2D par PCA (SVD randomisé).
-
-    On ne veut que 2 composantes sur 784 : un SVD complet les calcule toutes les
-    784 et coûte ~100x plus cher pour exactement le même sous-espace.
-
-    Si mean/components sont fournis, réutilise cette projection — indispensable
-    pour poser les neurones dans le repère des images, et non dans le leur.
-    Retourne (X_2d, mean, components).
-    """
-    X = np.asarray(X, dtype=np.float32)
-
-    if mean is None or components is None:
-        mean = X.mean(axis=0, keepdims=True)
-        Xc = X - mean
-        n, d = Xc.shape
-        rank = 2 + 10  # 2 composantes + marge d'over-sampling
-
-        if min(n, d) <= rank:
-            # Matrice déjà minuscule : le SVD exact est instantané.
-            _, _, Vt = np.linalg.svd(Xc, full_matrices=False)
-        else:
-            # SVD randomisé (Halko et al.) : on comprime Xc sur un petit
-            # sous-espace aléatoire, puis SVD exact de cette petite matrice.
-            rng = np.random.default_rng(seed)
-            Y = Xc @ rng.standard_normal((d, rank)).astype(np.float32)
-            for _ in range(n_iter):
-                # Itérations de puissance : écrasent les composantes faibles
-                # pour que Y capture bien les axes dominants.
-                Y, _ = np.linalg.qr(Y)
-                Y = Xc @ (Xc.T @ Y)
-            Q, _ = np.linalg.qr(Y)
-            _, _, Vt = np.linalg.svd(Q.T @ Xc, full_matrices=False)
-
-        components = Vt[:2]  # (2, d)
-    else:
-        Xc = X - mean
-
-    return Xc @ components.T, mean, components
-
-
-def plot_latent_space(X, weights, rows, cols, y_true=None, class_names=None,
-                      topology="hex", show_grid=True,
-                      title="Espace latent — SOM (projection PCA)",
-                      figsize=(8, 7), show=True, y_label="Chiffre réel"):
-    """Nuage de points de l'espace latent : images projetées en PCA, colorées par
-    neurone, avec la carte de Kohonen posée dans le même plan.
-
-    Même figure que plot_latent_space du K-means — à gauche coloré par neurone, à
-    droite par label réel, les prototypes en croix noires — avec en plus le
-    maillage de la grille.
-
-    --- Le maillage ---
-
-    Chaque segment relie deux neurones VOISINS SUR LA GRILLE. Leurs positions,
-    elles, sont celles de leurs feature vectors dans le plan PCA. Le dessin
-    montre donc la carte se replier à travers les données :
-
-        maillage régulier et étalé -> la grille couvre le nuage sans se tordre
-        segments longs             -> deux voisins ont appris des choses très
-                                      différentes : on saute une frontière
-        paquet de neurones serrés  -> plusieurs voisins sur le même mode
-
-    Un K-means n'a pas cet objet : ses centroïdes n'ont pas de voisins, il n'y a
-    rien à relier.
-
-    --- Le prix de la PCA ---
-
-    Les 2 composantes ne retiennent qu'environ 17 % de la variance de MNIST : le
-    reste est écrasé, et des images très éloignées peuvent atterrir au même
-    endroit. Deux neurones qui semblent superposés ici ne le sont pas forcément
-    en 784 dimensions — c'est le maillage, pas la distance à l'écran, qui dit qui
-    est voisin de qui.
-
-    Args:
-        X:            (n, d) images à projeter.
-        weights:      (k, 784) feature vectors, k = rows · cols.
-        rows, cols:   forme de la grille.
-        topology:     celle de l'entraînement — "hex" ou "rect".
-        show_grid:    trace le maillage entre neurones voisins.
-        y_true:       (n,) labels réels ; ajoute un 2e nuage coloré par label
-                      réel pour comparaison, si fourni.
-        class_names:  noms lisibles des classes ; indices si None.
-        show:         True -> plt.show() (notebook) ; False -> retourne la figure.
-        y_label:      nom de ce que désignent les labels réels. « Chiffre réel »
-                      pour MNIST, mais « Classe réelle » pour Quick, Draw! —
-                      les catégories n'y sont pas des chiffres.
-    """
-    rows, cols = int(rows), int(cols)
-    k = rows * cols
-    X = np.asarray(X, dtype=np.float32)
-    weights = np.asarray(weights, dtype=np.float32)
-    if weights.shape[0] != k:
-        raise ValueError(
-            f"{weights.shape[0]} feature vectors pour une grille {rows}x{cols} = {k} cases."
-        )
-    n = X.shape[0]
-
-    cluster_labels = np.argmin(compute_squared_distances(X, weights), axis=1)
-
-    # Repère PCA calculé sur les images, puis REUTILISÉ pour les neurones : leur
-    # donner leur propre PCA les poserait dans un plan sans rapport.
-    X_2d, mean, components = _pca_2d(X)
-    W_2d, _, _ = _pca_2d(weights, mean=mean, components=components)
-
-    # Segments entre voisins de grille — calculés une fois, dessinés sur les deux
-    # panneaux. « Voisin » = à distance 1 dans l'espace topologique : les 6 d'un
-    # hexagone, les 4 d'une case carrée.
-    segments = None
-    if show_grid:
-        coords = grid_coords(rows, cols, topology)
-        d_grid = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=2)
-        pairs = np.argwhere(np.triu(np.abs(d_grid - 1.0) < 1e-3, k=1))
-        segments = [[W_2d[i], W_2d[j]] for i, j in pairs]
-
-    n_plots = 2 if y_true is not None else 1
-    fig, axes = plt.subplots(1, n_plots, figsize=(figsize[0] * n_plots, figsize[1]),
-                             squeeze=False)
-    axes = axes.ravel()
-
-    # --- Nuage coloré par neurone ---
-    ax = axes[0]
-    scatter = ax.scatter(X_2d[:, 0], X_2d[:, 1], c=cluster_labels, cmap="tab10",
-                         s=8, alpha=0.6)
-    ax.set_title(title)
-    fig.colorbar(scatter, ax=ax, label="Neurone (= code du codec)")
-
-    # --- Nuage coloré par label réel (optionnel) ---
-    if y_true is not None:
-        y_true = np.asarray(y_true).astype(int).ravel()
-        if y_true.shape[0] != n:
-            raise ValueError(
-                f"y_true a {y_true.shape[0]} éléments mais X en a {n}. "
-                f"Passe la même tranche (ex. y_train[:{n}])."
-            )
-        n_classes = int(y_true.max() + 1)
-        if class_names is not None:
-            n_classes = max(n_classes, len(class_names))
-
-        ax = axes[1]
-        cmap = plt.get_cmap("tab10" if n_classes <= 10 else "tab20", n_classes)
-        scatter_true = ax.scatter(X_2d[:, 0], X_2d[:, 1], c=y_true, cmap=cmap,
-                                  s=8, alpha=0.6, vmin=-0.5, vmax=n_classes - 0.5)
-        ax.set_title(f"Même projection, colorée par {y_label.lower()}")
-        cbar = fig.colorbar(scatter_true, ax=ax, ticks=range(n_classes))
-        cbar.set_label(y_label)
-        if class_names is not None:
-            cbar.ax.set_yticklabels(class_names)
-
-    for ax in axes:
-        if segments:
-            # LineCollection plutôt que 270 appels à plot() : un seul artiste,
-            # rendu bien plus rapide.
-            ax.add_collection(LineCollection(
-                segments, colors="black", linewidths=0.6, alpha=0.35, zorder=2,
-                label="Voisinage sur la grille",
-            ))
-        ax.scatter(W_2d[:, 0], W_2d[:, 1], c="black", marker="X", s=60,
-                   edgecolors="white", linewidths=0.8, zorder=3, label="Neurones")
-        ax.legend(loc="best", fontsize=8)
-        ax.set_xlabel("Composante principale 1")
-        ax.set_ylabel("Composante principale 2")
 
     fig.tight_layout()
     if show:

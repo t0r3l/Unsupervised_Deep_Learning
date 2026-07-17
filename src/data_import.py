@@ -7,10 +7,12 @@ récupèrent le même format, quel que soit le dataset :
     X_test  (m, 784) float32 dans [0, 1]   ·   y_test  (m,) int
     class_names : le nom lisible de chaque label
 
-Deux datasets sont disponibles :
-    - "mnist"     : chiffres manuscrits 0-9, via Keras.
-    - "quickdraw" : les classes de CLASSES (cat, apple, car), via les bitmaps
-                    28x28 officiels de Google.
+Trois datasets sont disponibles :
+    - "mnist"       : chiffres manuscrits 0-9, via Keras.
+    - "quickdraw"   : les classes de CLASSES (cat, apple, car), via les bitmaps
+                      28x28 officiels de Google.
+    - "quickdraw10" : même source, mais les 10 classes de CLASSES_10 — un
+                      Quick, Draw! aussi « large » que MNIST (10 classes).
 
 --- Deux formats Quick, Draw!, à ne pas confondre ---
 
@@ -41,6 +43,11 @@ ROOT = Path(__file__).resolve().parents[1]
 # Les trois classes retenues pour le projet.
 CLASSES = ["cat", "apple", "car"]
 
+# La variante à 10 classes : les 3 d'origine plus 7 formes bien distinctes
+# les unes des autres, pour comparer les algos à « largeur » égale avec MNIST
+# (10 classes aussi). Chaque nom correspond à un .npy officiel de Google.
+CLASSES_10 = CLASSES + ["fish", "house", "tree", "clock", "star", "umbrella", "airplane"]
+
 CACHE_DIR = ROOT / "data" / "binary"          # .bin vectoriels (paquet quickdraw)
 BITMAP_DIR = ROOT / "data" / "numpy_bitmap"   # .npy bitmaps 28x28 (clustering)
 BITMAP_URL = "https://storage.googleapis.com/quickdraw_dataset/full/numpy_bitmap/{}.npy"
@@ -70,6 +77,7 @@ class Dataset(NamedTuple):
 DATASETS = {
     "mnist": "MNIST — chiffres manuscrits 0-9",
     "quickdraw": f"Quick, Draw! — {', '.join(CLASSES)}",
+    "quickdraw10": f"Quick, Draw! 10 — {len(CLASSES_10)} classes ({CLASSES_10[0]}, {CLASSES_10[1]}…)",
 }
 
 
@@ -108,6 +116,7 @@ def load_quickdraw(
     test_ratio: float = 1 / 7,
     seed: int = 42,
     progress=None,
+    name: str = "quickdraw",
 ) -> Dataset:
     """Charge les classes Quick, Draw! en bitmaps 28x28, prêtes pour le clustering.
 
@@ -118,6 +127,8 @@ def load_quickdraw(
         test_ratio:    part réservée au test ; 1/7 reproduit le ratio de MNIST
                        (60 000 train / 10 000 test).
         seed:          rend le tirage et le découpage reproductibles.
+        name:          clé du dataset ("quickdraw" ou "quickdraw10") — elle part
+                       dans les métadonnées des modèles, qui filtrent dessus.
     """
     classes = list(classes or CLASSES)
     rng = np.random.default_rng(seed)
@@ -154,7 +165,7 @@ def load_quickdraw(
         X_test=X[:n_test],
         y_test=y[:n_test],
         class_names=classes,
-        name="quickdraw",
+        name=name,
     )
 
 
@@ -195,6 +206,12 @@ def load_dataset(key: str = "mnist", **kwargs) -> Dataset:
         return load_mnist(progress=kwargs.get("progress"))
     if key == "quickdraw":
         return load_quickdraw(**kwargs)
+    if key == "quickdraw10":
+        # 6 000 dessins par classe et non 10 000 : 10 classes × 6 000 = 60 000
+        # images, la taille exacte de MNIST — les comparaisons restent à volume
+        # égal, et la RAM ne double pas au passage à 10 classes.
+        kwargs.setdefault("max_per_class", 6000)
+        return load_quickdraw(classes=CLASSES_10, name="quickdraw10", **kwargs)
     raise ValueError(f"Dataset inconnu : {key!r}. Attendu : {list(DATASETS)}")
 
 
