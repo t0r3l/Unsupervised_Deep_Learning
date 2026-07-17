@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K-means &amp; Kohonen — Présentation</title>
+<style>
+  :root{
+    --bg:#0e1116; --bg2:#151a22; --card:#ffffff;
+    --fg:#eef2f7; --muted:#9aa7b8; --line:#252c37;
+    --accent:#5eb0ff; --accent2:#7ee0c0; --warn:#ffcf6b;
+    --radius:16px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    overflow:hidden;
+  }
+
+  /* ---------- deck / slides ---------- */
+  .deck{height:100vh;width:100vw;position:relative}
+  .slide{
+    position:absolute;inset:0;display:none;
+    flex-direction:column;padding:4.2vh 4.5vw 6vh;
+  }
+  .slide.active{display:flex}
+
+  .kicker{
+    font-size:1.05vw;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--accent);font-weight:700;margin-bottom:.6vh;
+  }
+  .slide h2{font-size:2.5vw;line-height:1.12;font-weight:800;letter-spacing:-.01em}
+  .slide h2 .dim{color:var(--muted);font-weight:600}
+  .subtitle{color:var(--muted);font-size:1.25vw;margin-top:.8vh}
+
+  /* image area */
+  .imgrow{
+    flex:1;display:flex;gap:1.6vw;align-items:center;justify-content:center;
+    margin-top:2.2vh;min-height:0;
+  }
+  .figure{
+    background:var(--card);border-radius:var(--radius);
+    padding:1.1vh 1.1vw;display:flex;flex-direction:column;gap:.7vh;
+    box-shadow:0 18px 50px rgba(0,0,0,.45);
+    max-height:100%;min-width:0;
+  }
+  .figure img{
+    max-width:100%;max-height:66vh;object-fit:contain;border-radius:8px;display:block;margin:0 auto;
+  }
+  .imgrow.trio .figure img{max-height:58vh}
+  .figure figcaption{
+    color:#3a434f;font-size:.95vw;font-weight:600;text-align:center;
+  }
+  .caption{
+    margin-top:2vh;color:var(--muted);font-size:1.2vw;line-height:1.4;max-width:64vw;
+  }
+  .caption b{color:var(--fg)}
+  .tag{
+    display:inline-block;background:var(--bg2);border:1px solid var(--line);
+    color:var(--accent2);font-weight:700;font-size:1vw;padding:.3vh .8vw;border-radius:999px;margin-right:.6vw;
+  }
+
+  /* ---------- title slide ---------- */
+  .title{justify-content:center;align-items:flex-start;
+    background:radial-gradient(1200px 600px at 15% -10%, rgba(94,176,255,.14), transparent 60%),
+               radial-gradient(1000px 500px at 100% 120%, rgba(126,224,192,.12), transparent 55%);}
+  .title .big{font-size:5vw;font-weight:850;line-height:1.02;letter-spacing:-.02em;max-width:80vw}
+  .title .big em{font-style:normal;color:var(--accent)}
+  .title .lead{color:var(--muted);font-size:1.7vw;margin-top:2.4vh;max-width:60vw}
+  .title .meta{margin-top:5vh;color:var(--muted);font-size:1.15vw;display:flex;gap:1vw;flex-wrap:wrap}
+
+  /* ---------- section divider ---------- */
+  .section{justify-content:center}
+  .section .num{font-size:11vw;font-weight:850;color:var(--bg2);
+    -webkit-text-stroke:2px var(--accent);line-height:.9;letter-spacing:-.03em}
+  .section h2{font-size:3.6vw;margin-top:1vh}
+  .section p{color:var(--muted);font-size:1.4vw;margin-top:1.4vh;max-width:56vw}
+
+  /* ---------- concept table ---------- */
+  table.nat{width:100%;border-collapse:collapse;margin-top:3vh;font-size:1.15vw}
+  table.nat th,table.nat td{border:1px solid var(--line);padding:1.4vh 1.1vw;text-align:left;vertical-align:top}
+  table.nat thead th{background:var(--bg2);color:var(--accent);font-size:1vw;letter-spacing:.05em;text-transform:uppercase}
+  table.nat td b{color:var(--fg)} table.nat td{color:var(--muted)}
+  table.nat tr td:first-child{color:var(--fg);font-weight:700;width:14%}
+  .same{color:var(--accent2);font-weight:700}
+
+  /* ---------- conclusion ---------- */
+  .concl ul{margin-top:2.4vh;list-style:none;display:flex;flex-direction:column;gap:1.6vh;max-width:78vw}
+  .concl li{font-size:1.35vw;line-height:1.4;padding-left:2.4vw;position:relative;color:var(--muted)}
+  .concl li::before{content:"";position:absolute;left:0;top:.55vh;width:1.1vw;height:1.1vw;border-radius:4px;background:var(--accent)}
+  .concl li b{color:var(--fg)}
+  .concl li.warn::before{background:var(--warn)}
+
+  /* ---------- chrome ---------- */
+  .progress{position:fixed;top:0;left:0;height:4px;background:linear-gradient(90deg,var(--accent),var(--accent2));width:0;transition:width .25s ease;z-index:10}
+  .counter{position:fixed;bottom:2.2vh;right:2.4vw;color:var(--muted);font-size:1vw;font-variant-numeric:tabular-nums;z-index:10}
+  .hint{position:fixed;bottom:2.2vh;left:2.4vw;color:var(--line);font-size:.9vw;z-index:10}
+  .navzone{position:fixed;top:0;bottom:0;width:20vw;z-index:5;cursor:pointer}
+  .navzone.left{left:0} .navzone.right{right:0}
+
+  @media print{
+    body{overflow:visible;background:#fff}
+    .slide{position:relative;display:flex!important;height:100vh;page-break-after:always;border-bottom:1px solid #ddd}
+    .progress,.counter,.hint,.navzone{display:none}
+    .kicker{color:#0a66c2}
+    .slide h2,.title .big,.section h2{color:#0b0f14}
+    .subtitle,.caption,.section p,.title .lead,.concl li{color:#333}
+  }
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<div class="deck" id="deck"></div>
+<div class="navzone left"  onclick="go(-1)"></div>
+<div class="navzone right" onclick="go(1)"></div>
+<div class="counter" id="counter"></div>
+<div class="hint">← → pour naviguer · F plein écran</div>
+
+<script>
+const BASE = "Rapport%20Unsupervised%20Deep%20Learning/";
+const img = n => BASE + (n===0 ? "image.png" : "image%20"+n+".png");
+
+// figure(imageIndex, caption under the figure)
+const fig = (n, cap="") =>
+  `<figure class="figure"><img src="${img(n)}" alt="figure ${n}">${cap?`<figcaption>${cap}</figcaption>`:""}</figure>`;
+
+const slides = [
+
+/* 1 — TITRE */
+`<section class="slide title active">
+  <div class="big">Compresser une image<br>par <em>quantification</em></div>
+  <div class="lead">K-means &amp; Kohonen — deux dictionnaires appris, un même codec.<br>Résultats sur MNIST (chiffres) et QuickDraw (dessins).</div>
+  <div class="meta"><span>Deep Learning non supervisé</span><span>·</span><span>MNIST &amp; QuickDraw</span></div>
+</section>`,
+
+/* 2 — CONCEPT */
+`<section class="slide">
+  <div class="kicker">Le principe</div>
+  <h2>Encoder une image = <span class="dim">l'indice de son prototype</span></h2>
+  <table class="nat">
+    <thead><tr><th>Algo</th><th>Espace latent</th><th>CodeBook</th><th>CodeByte / image</th><th>Compression</th></tr></thead>
+    <tbody>
+      <tr><td>K-means<br>(k=300)</td><td><b>Entier discret</b> : indice du cluster ∈ {0…k−1}</td><td>les <b>k centroïdes</b> (k × 784 flottants)</td><td>⌈log₂300⌉ = <b>9 bits</b></td><td><b>697:1</b></td></tr>
+      <tr><td>Kohonen<br>(k=300)</td><td><b>Entier discret</b> : indice du neurone gagnant (BMU)</td><td>les <b>k feature vectors</b></td><td><span class="same">9 bits — identique</span></td><td><span class="same">≈ 697:1</span></td></tr>
+    </tbody>
+  </table>
+  <div class="caption">Même codec, même taux de compression. Toute la différence est dans <b>comment le dictionnaire est organisé</b>.</div>
+</section>`,
+
+/* 3 — SECTION K-MEANS */
+`<section class="slide section">
+  <div class="num">01</div>
+  <h2>K-means</h2>
+  <p>Algorithme de Lloyd : chaque image → le centroïde le plus proche. Décoder = renvoyer le centroïde.</p>
+</section>`,
+
+/* 4 — MNIST k300 reconstructions */
+`<section class="slide">
+  <div class="kicker">K-means · MNIST · k = 300</div>
+  <h2>Compression → décompression</h2>
+  <div class="imgrow">${fig(2,"TRAIN — original (haut) vs reconstruit (bas)")}${fig(3,"TEST")}</div>
+  <div class="caption"><span class="tag">MSE 0,031</span><span class="tag">697:1</span> À k=300 le flou est faible : les chiffres restent nets et reconnaissables.</div>
+</section>`,
+
+/* 5 — MNIST k300 dictionnaire */
+`<section class="slide">
+  <div class="kicker">K-means · MNIST · k = 300</div>
+  <h2>Le dictionnaire = les 300 centroïdes</h2>
+  <div class="imgrow">${fig(6)}</div>
+  <div class="caption">Chaque image ne transmet que <b>l'indice</b> de sa case (9 bits). Pureté des clusters : <b>91,5 %</b> — à k élevé, une classe domine chaque cluster.</div>
+</section>`,
+
+/* 6 — rôle de k (dictionnaires) */
+`<section class="slide">
+  <div class="kicker">K-means · QuickDraw (3 classes)</div>
+  <h2>Plus de centroïdes → représentants plus fins</h2>
+  <div class="imgrow trio">${fig(25,"k = 3 · MSE 0,079")}${fig(45,"k = 100 · MSE 0,061")}${fig(63,"k = 1000 · MSE 0,051")}</div>
+  <div class="caption">À <b>k=3</b> le dictionnaire ne capte qu'une forme globale (et selon l'init, une classe peut manquer). Chaque ×10 sur k affine les prototypes.</div>
+</section>`,
+
+/* 7 — QuickDraw reconstruction k1000 */
+`<section class="slide">
+  <div class="kicker">K-means · QuickDraw · k = 1000</div>
+  <h2>Les formes reviennent</h2>
+  <div class="imgrow">${fig(60,"TEST — original (haut) vs reconstruit (bas)")}</div>
+  <div class="caption">Voitures de profil et pommes bien reconstruites ; les chats — très variables d'un dessin à l'autre — restent les plus difficiles.</div>
+</section>`,
+
+/* 8 — QuickDraw 10 classes k10 vs k5000 */
+`<section class="slide">
+  <div class="kicker">K-means · QuickDraw (10 classes)</div>
+  <h2>10 classes : <span class="dim">k = 10 insuffisant → k = 5000</span></h2>
+  <div class="imgrow">${fig(71,"k = 10 · MSE 0,075")}${fig(98,"k = 5000 · MSE 0,045")}</div>
+  <div class="caption">Avec k = nombre de classes, trop de diversité par cluster : formes floues. À <b>k=5000</b>, chaque dessin retrouve un représentant proche de sa forme réelle.</div>
+</section>`,
+
+/* 9 — SECTION KOHONEN */
+`<section class="slide section">
+  <div class="num">02</div>
+  <h2>Kohonen (SOM)</h2>
+  <p>Même codec, mais les neurones vivent sur une grille : on entraîne le gagnant <b>et ses voisins</b>. Le dictionnaire devient une carte.</p>
+</section>`,
+
+/* 10 — Kohonen MNIST 10x10 */
+`<section class="slide">
+  <div class="kicker">Kohonen · MNIST · grille 10×10</div>
+  <h2>La carte s'auto-organise</h2>
+  <div class="imgrow">${fig(105)}</div>
+  <div class="caption">Les chiffres proches deviennent <b>voisins</b> : la carte forme un dégradé continu (0→6→8→9→7, 1 dans un coin). Pureté ≈ 70 %.</div>
+</section>`,
+
+/* 11 — Kohonen MNIST 20x20 */
+`<section class="slide">
+  <div class="kicker">Kohonen · MNIST · grille 20×20</div>
+  <h2>Grille plus grande → moins de mélange</h2>
+  <div class="imgrow">${fig(112)}</div>
+  <div class="caption">Ce qui était mal séparé en 10×10 (les <b>4 / 7 / 9</b>) obtient ici ses propres zones, bien reconnaissables. Agrandir la grille ≈ augmenter k.</div>
+</section>`,
+
+/* 12 — Kohonen QuickDraw 10x10 */
+`<section class="slide">
+  <div class="kicker">Kohonen · QuickDraw · 10×10 · γ=0,5 · 100 époques</div>
+  <h2>Des zones par classe</h2>
+  <div class="imgrow">${fig(132)}</div>
+  <div class="caption">Un petit <b>γ</b> et beaucoup d'époques laissent le temps aux rapprochements : les pommes, chats et voitures se regroupent en régions distinctes.</div>
+</section>`,
+
+/* 13 — Kohonen QuickDraw 20x20 */
+`<section class="slide">
+  <div class="kicker">Kohonen · QuickDraw · grille 20×20</div>
+  <h2>car → cat → apple : transitions douces</h2>
+  <div class="imgrow">${fig(146)}</div>
+  <div class="caption">La topologie est visible : on passe progressivement d'une classe à l'autre le long de la carte, sans frontière brutale.</div>
+</section>`,
+
+/* 14 — SECTION COMPARAISON */
+`<section class="slide section">
+  <div class="num">03</div>
+  <h2>K-means vs Kohonen</h2>
+  <p>Même prix (9 bits/image). Que gagne-t-on avec la carte&nbsp;?</p>
+</section>`,
+
+/* 15 — comparaison côte à côte */
+`<section class="slide">
+  <div class="kicker">Même compression, dictionnaire différent</div>
+  <h2>Ordre arbitraire <span class="dim">vs</span> carte lisible</h2>
+  <div class="imgrow">${fig(6,"K-means — centroïdes sans ordre")}${fig(105,"Kohonen — dictionnaire ordonné")}</div>
+  <div class="caption">Les indices d'un K-means n'ont aucune relation entre eux ; ceux d'un SOM, si : <b>code proche = image proche</b>.</div>
+</section>`,
+
+/* 16 — CONCLUSION */
+`<section class="slide concl">
+  <div class="kicker">Conclusion</div>
+  <h2>Ce que montrent nos tests</h2>
+  <ul>
+    <li><b>Augmenter k</b> (K-means) ou la <b>taille de grille</b> (SOM) → reconstruction plus nette et clusters plus purs. MNIST net dès k≈300 ; QuickDraw demande k≈1000–5000.</li>
+    <li class="warn"><b>k trop petit</b> (k=3, k=10) → images floues et, selon l'initialisation, des classes non représentées.</li>
+    <li><b>Kohonen</b> : même compression que K-means, mais un dictionnaire <b>ordonné</b> — carte lisible, dégradés, voisinage porteur de sens.</li>
+    <li><b>γ petit + beaucoup d'époques</b> = meilleurs rapprochements ; grille 20×20 + γ=0,5 = nos meilleurs résultats.</li>
+    <li class="warn">Limite commune : la <b>distance euclidienne</b> garde une reconstruction floue, même à k élevé.</li>
+  </ul>
+</section>`,
+
+];
+
+// ---------- render + navigation ----------
+const deck = document.getElementById('deck');
+deck.innerHTML = slides.join('');
+const els = [...document.querySelectorAll('.slide')];
+let i = 0;
+const counter = document.getElementById('counter');
+const progress = document.getElementById('progress');
+
+function show(n){
+  i = Math.max(0, Math.min(els.length-1, n));
+  els.forEach((s,k)=>s.classList.toggle('active', k===i));
+  counter.textContent = (i+1)+" / "+els.length;
+  progress.style.width = ((i)/(els.length-1)*100)+"%";
+}
+function go(d){ show(i+d); }
+
+document.addEventListener('keydown', e=>{
+  if(e.key==='ArrowRight'||e.key===' '||e.key==='PageDown'){ go(1); e.preventDefault(); }
+  else if(e.key==='ArrowLeft'||e.key==='PageUp'){ go(-1); e.preventDefault(); }
+  else if(e.key==='Home'){ show(0); }
+  else if(e.key==='End'){ show(els.length-1); }
+  else if(e.key==='f'||e.key==='F'){
+    if(!document.fullscreenElement) document.documentElement.requestFullscreen();
+    else document.exitFullscreen();
+  }
+});
+show(0);
+</script>
+</body>
+</html>

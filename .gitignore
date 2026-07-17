@@ -19,17 +19,17 @@
 # ------------------------------------------------------------------
 # Model artifacts, checkpoints and experiment logs
 # ------------------------------------------------------------------
-*.h5
-*.keras
-*.hdf5
-*.ckpt
-*.pb
-models/
-checkpoints/
-logs/
-runs/
-wandb/
-mlruns/
+# *.h5
+# *.keras
+# *.hdf5
+# *.ckpt
+# *.pb
+# models/
+# checkpoints/
+# logs/
+# runs/
+# wandb/
+# mlruns/
 
 # ------------------------------------------------------------------
 # Python
